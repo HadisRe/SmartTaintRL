@@ -105,16 +105,24 @@ SmartTaintRL/
 │   │   ├── env3_state_builder.py  # 100-dim state vector construction
 │   │   └── env4_environment.py    # Main RL environment (Gymnasium)
 │   │
-│   └── preprocessing/
-│       ├── embed1_profile.py      # Contract profile generation
-│       ├── embed2_path_db.py      # Path database construction  
-│       └── embed3_modifiers.py    # Modifier extraction and integration
+│   ├── preprocessing/
+│   │   ├── embed1_profile.py      # Contract profile generation
+│   │   ├── embed2_path_db.py      # Path database construction  
+│   │   └── embed3_modifiers.py    # Modifier extraction and integration
+│   │
+│   └── localization/
+│       ├── localizer.py           # Function and node-level localization
+│       └── test_localization.py   # Evaluation on ground truth contracts
+│
+├── data/
+│   └── ground_truth/
+│       └── final_dataset_14_contracts.pkl  # Ground truth for localization
 │
 ├── requirements.txt
 ├── LICENSE
 └── README.md
 
-# Data available on Google Drive (see Data section)
+# Pre-processed datasets available on Google Drive (see Data section)
 ```
 
 ## Data
@@ -191,6 +199,8 @@ After detection, the system localizes vulnerabilities using:
 - Graph propagation with centrality analysis
 - Function-level and node-level ranking
 
+The localization module (`src/localization/`) implements this phase, providing ranked lists of suspicious functions and nodes within each contract.
+
 ## Comparison with Existing Tools
 
 | Method | F1 (Balanced) | F1 (Imbalanced) | Time |
@@ -214,6 +224,33 @@ We used a filtered subset of contracts for RL training:
 - 4,083 safe contracts
 
 The imbalanced dataset reflects real-world conditions where vulnerable contracts are significantly fewer than safe ones (approximately 1:18 ratio).
+
+## Usage
+
+### Training the DQN Agent
+
+To train the model from scratch, run the DQN agent with the path databases:
+
+```bash
+python src/rl_agent/dqn_agent.py
+```
+
+For optimal results, train the model for 2500 to 3500 episodes. Our experiments show that models trained within this range achieve the best balance between detection accuracy and generalization.
+
+### Running Localization
+
+The localization module requires a trained model. After training, you can run vulnerability localization:
+
+```bash
+python src/localization/test_localization.py
+```
+
+This will evaluate function-level and node-level localization on the 14 ground truth contracts. The localizer uses gradient-based attribution from the trained Q-network to identify vulnerable functions and nodes.
+
+Expected results (as reported in the paper):
+- Strict Accuracy: 64.3%
+- Relaxed Accuracy (with caller detection): 92.9%
+- Node-level P@5: 0.65, R@5: 0.77, F1@5: 0.70
 
 ## Related Work
 
