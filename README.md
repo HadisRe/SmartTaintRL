@@ -100,10 +100,10 @@ SmartTaintRL/
 ├── src/
 │   ├── rl_agent/
 │   │   ├── dqn_agent.py           # Deep Q-Network and training loop
-│   │   ├── env_data_loader.py     # Contract data loader
-│   │   ├── env_pool_manager.py    # Pool management for path selection
-│   │   ├── env_state_builder.py   # 100-dim state vector construction
-│   │   └── env_main.py            # Main RL environment (Gymnasium)
+│   │   ├── env1_data_loader.py    # Contract data loader
+│   │   ├── env2_pool_manager.py   # Pool management for path selection
+│   │   ├── env3_state_builder.py  # 100-dim state vector construction
+│   │   └── env4_environment.py    # Main RL environment (Gymnasium)
 │   │
 │   └── preprocessing/
 │       ├── embed1_profile.py      # Contract profile generation
@@ -201,10 +201,17 @@ After detection, the system localizes vulnerabilities using:
 
 ## Dataset
 
-Evaluated on 4,706 real-world contracts from Ethereum mainnet:
-- 423 vulnerable contracts
-- 4,283 safe contracts
-- 252,844 execution paths
+We used a filtered subset of contracts for RL training:
+
+**Balanced Dataset:** 400 contracts
+- 200 vulnerable contracts
+- 200 safe contracts
+
+**Imbalanced Dataset:** 4,306 contracts  
+- 223 vulnerable contracts
+- 4,083 safe contracts
+
+The imbalanced dataset reflects real-world conditions where vulnerable contracts are significantly fewer than safe ones (approximately 1:18 ratio).
 
 ## Related Work
 
