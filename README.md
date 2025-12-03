@@ -8,7 +8,7 @@
 
 ## Overview
 
-SmartTaintRL is a novel framework that combines taint analysis with deep reinforcement learning to detect and localize Bad Randomness vulnerabilities in Ethereum smart contracts. Unlike traditional approaches that rely on pattern matching or exhaustive path exploration, our method uses a Deep Q-Network (DQN) agent to intelligently prioritize high-risk execution paths.
+SmartTaintRL is a framework that combines taint analysis with deep reinforcement learning to detect and localize Bad Randomness vulnerabilities in Ethereum smart contracts. Unlike traditional approaches that rely on pattern matching or exhaustive path exploration, our method uses a Deep Q-Network (DQN) agent to intelligently prioritize high-risk execution paths.
 
 ### Key Features
 
@@ -52,65 +52,142 @@ These vulnerabilities have caused significant financial losses, including the Sm
 
 ## Installation
 
+### Step 1: Clone the Repository
+
 ```bash
-# Clone the repository
-git clone https://github.com/YourUsername/SmartTaintRL.git
+git clone https://github.com/HadisRe/SmartTaintRL.git
 cd SmartTaintRL
+```
 
-# Create virtual environment
+### Step 2: Create Virtual Environment
+
+We recommend using a virtual environment to avoid dependency conflicts.
+
+**On Linux/Mac:**
+```bash
 python -m venv venv
-source venv/bin/activate  # Linux/Mac
-# or
-venv\Scripts\activate  # Windows
+source venv/bin/activate
+```
 
-# Install dependencies
+**On Windows:**
+```bash
+python -m venv venv
+venv\Scripts\activate
+```
+
+### Step 3: Install Dependencies
+
+```bash
 pip install -r requirements.txt
 ```
 
-## Requirements
+This will install:
+- PyTorch (deep learning framework)
+- NumPy (numerical computing)
+- Gymnasium (RL environment)
+- Matplotlib and Seaborn (visualization)
 
-- Python 3.8+
-- PyTorch 1.9+
-- NumPy
-- NetworkX
-- Solidity compiler (solc)
+### Step 4: Verify Installation
+
+```bash
+python -c "import torch; import gymnasium; print('Installation successful!')"
+```
 
 ## Project Structure
 
 ```
 SmartTaintRL/
 ├── src/
-│   ├── taint_analyzer.py      # Taint analysis module
-│   ├── feature_extractor.py   # 100-dimensional feature extraction
-│   ├── dqn_agent.py           # Deep Q-Network implementation
-│   ├── localizer.py           # Vulnerability localization
-│   └── utils.py               # Utility functions
+│   ├── rl_agent/
+│   │   ├── dqn_agent.py           # Deep Q-Network and training loop
+│   │   ├── env_data_loader.py     # Contract data loader
+│   │   ├── env_pool_manager.py    # Pool management for path selection
+│   │   ├── env_state_builder.py   # 100-dim state vector construction
+│   │   └── env_main.py            # Main RL environment (Gymnasium)
+│   │
+│   └── preprocessing/
+│       ├── embed1_profile.py      # Contract profile generation
+│       ├── embed2_path_db.py      # Path database construction  
+│       └── embed3_modifiers.py    # Modifier extraction and integration
+│
 ├── models/
-│   └── trained_dqn_model.pth  # Pre-trained model weights
+│   └── trained_dqn_model_2500.pth # Pre-trained model (2500 episodes)
+│
 ├── data/
-│   └── sample_contracts/      # Example vulnerable contracts
-├── evaluation/
-│   └── benchmark.py           # Evaluation scripts
-└── requirements.txt
+│   ├── path_databases/            # Ready-to-use path features (JSON)
+│   └── contract_profiles/         # Ready-to-use contract profiles (JSON)
+│
+├── requirements.txt
+├── LICENSE
+└── README.md
 ```
+
+## Data
+
+### Option 1: Use Pre-processed Data (Recommended)
+
+The `data/` folder contains pre-processed features for 4,706 contracts. You can directly use these files for training and evaluation without running the preprocessing pipeline.
+
+- `data/path_databases/`: Contains path-level features (100-dimensional vectors) for each contract
+- `data/contract_profiles/`: Contains contract-level metadata and statistics
+
+### Option 2: Generate Data from Scratch
+
+If you want to process new contracts or regenerate the features, you need to:
+
+**Step 1:** Run [TaintSentinel](https://github.com/HadisRe/TaintSentinel) on your Solidity contracts to generate:
+- AST files (`*_ast.json`)
+- Semantic graphs (`*_semantic_graph.json`)
+- Taint analysis results (`*_taint_analysis_filtered.json`)
+
+**Step 2:** Run the preprocessing scripts in order:
+
+```bash
+# Generate contract profiles from TaintSentinel outputs
+python src/preprocessing/embed1_profile.py
+
+# Build path databases with 100-dimensional features
+python src/preprocessing/embed2_path_db.py
+
+# Extract and integrate modifier information
+python src/preprocessing/embed3_modifiers.py
+```
+
+These scripts read the TaintSentinel outputs and create the feature files needed for the RL agent.
 
 ## Methodology
 
-### Phase 1: Taint Analysis
-- Transforms Solidity code into semantic graphs (CFG + DFG)
-- Identifies taint sources (weak entropy) and sinks (sensitive operations)
-- Extracts all possible taint paths with 100-dimensional feature vectors
+### Phase 1: Taint Analysis (Preprocessing)
+
+This phase uses [TaintSentinel](https://github.com/HadisRe/TaintSentinel) for:
+- Transforming Solidity code into semantic graphs (CFG + DFG)
+- Identifying taint sources (weak entropy) and sinks (sensitive operations)
+- Extracting all possible taint paths
+
+The preprocessing scripts (`embed*.py`) then process these outputs to create 100-dimensional feature vectors for each path, including:
+- Structural features (path length, node diversity, branch complexity)
+- Security features (require density, modifier protection, mitigation score)
+- Semantic features (keccak operations, arithmetic intensity)
+- Source-sink interaction features
 
 ### Phase 2: RL-based Path Prioritization
-- DQN agent learns to ANALYZE or SKIP paths based on risk assessment
-- Dynamic pool management with priority scoring
+
+The DQN agent learns to make ANALYZE or SKIP decisions for each path:
+- **State**: 20 × 100 matrix (20 paths in pool, 100 features each)
+- **Action**: ANALYZE or SKIP for selected path
+- **Reward**: Hierarchical reward based on path importance and risk level
+
+Key components:
+- Dynamic pool management with priority-based refilling
+- Pattern registry for tracking discovered vulnerability signatures
 - Hierarchical reward engineering with safety constraints
-- Pattern registry for exploration guidance
 
 ### Phase 3: Vulnerability Localization
-- Gradient-based attribution for node importance
+
+After detection, the system localizes vulnerabilities using:
+- Gradient-based attribution from Q-network
 - Graph propagation with centrality analysis
-- Function-level and node-level identification
+- Function-level and node-level ranking
 
 ## Comparison with Existing Tools
 
@@ -129,10 +206,11 @@ Evaluated on 4,706 real-world contracts from Ethereum mainnet:
 - 4,283 safe contracts
 - 252,844 execution paths
 
+## Related Work
+
+This project builds upon:
+- [TaintSentinel](https://github.com/HadisRe/TaintSentinel) - Taint analysis framework used for preprocessing
+
 ## License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
-## Contributing
-
-Contributions are welcome! Please feel free to submit a Pull Request.
