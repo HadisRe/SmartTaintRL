@@ -110,26 +110,28 @@ SmartTaintRL/
 │       ├── embed2_path_db.py      # Path database construction  
 │       └── embed3_modifiers.py    # Modifier extraction and integration
 │
-├── models/
-│   └── trained_dqn_model_2500.pth # Pre-trained model (2500 episodes)
-│
-├── data/
-│   ├── path_databases/            # Ready-to-use path features (JSON)
-│   └── contract_profiles/         # Ready-to-use contract profiles (JSON)
-│
 ├── requirements.txt
 ├── LICENSE
 └── README.md
+
+# Data available on Google Drive (see Data section)
 ```
 
 ## Data
 
 ### Option 1: Use Pre-processed Data (Recommended)
 
-The `data/` folder contains pre-processed features for 4,706 contracts. You can directly use these files for training and evaluation without running the preprocessing pipeline.
+The pre-processed datasets are available on Google Drive due to file size limitations:
 
-- `data/path_databases/`: Contains path-level features (100-dimensional vectors) for each contract
-- `data/contract_profiles/`: Contains contract-level metadata and statistics
+**[Download Dataset from Google Drive](https://drive.google.com/drive/folders/1st4LL5UqWfV2BA-eBALnXXLS_PuZw2Uv)**
+
+The dataset contains:
+- `contract_profiles_Balanced/`: Contract profiles for balanced dataset (200 vulnerable, 200 safe)
+- `contract_profiles_Imbalanced/`: Contract profiles for imbalanced dataset (223 vulnerable, 4,083 safe)
+- `path_databases_updated_Balanced/`: Path-level features for balanced dataset
+- `path_databases_updated_Imbalanced/`: Path-level features for imbalanced dataset
+
+Each path database contains 100-dimensional feature vectors extracted from taint analysis results.
 
 ### Option 2: Generate Data from Scratch
 
