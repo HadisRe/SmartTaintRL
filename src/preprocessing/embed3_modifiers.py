@@ -5,22 +5,16 @@ from collections import defaultdict
 
 
 def extract_modifiers_from_source(sol_file_path):
-    """
-    استخراج modifier data از source code با دقت بالا
-    """
+    
     with open(sol_file_path, 'r', encoding='utf-8', errors='ignore') as f:
         content = f.read()
     
-    # 1. پیدا کردن modifier definitions
-    modifier_def_pattern = r'modifier\s+(\w+)\s*\([^)]*\)\s*\{'
+     modifier_def_pattern = r'modifier\s+(\w+)\s*\([^)]*\)\s*\{'
     modifier_defs = list(set(re.findall(modifier_def_pattern, content)))
     
-    # 2. ساخت mapping از function name به modifiers
-    function_modifiers_map = {}
+     function_modifiers_map = {}
     
-    # Pattern دقیق‌تر برای functions
-    # این pattern حتی overloaded functions را هم handle می‌کند
-    func_pattern = r'function\s+(\w+)\s*\(([^)]*)\)\s*([^{]+)\s*\{'
+     func_pattern = r'function\s+(\w+)\s*\(([^)]*)\)\s*([^{]+)\s*\{'
     
     func_matches = re.finditer(func_pattern, content)
     
@@ -29,22 +23,18 @@ def extract_modifiers_from_source(sol_file_path):
         func_params = match.group(2)
         modifiers_section = match.group(3)
         
-        # حذف keywords که modifier نیستند
-        visibility_keywords = ['public', 'private', 'internal', 'external', 
+         visibility_keywords = ['public', 'private', 'internal', 'external', 
                               'view', 'pure', 'payable', 'returns', 'override', 
                               'virtual', 'constant']
         
-        # پیدا کردن modifiers واقعی
-        found_modifiers = []
+         found_modifiers = []
         for mod_def in modifier_defs:
             # Pattern دقیق برای match کردن modifier
             pattern = r'\b' + re.escape(mod_def) + r'\b'
             if re.search(pattern, modifiers_section):
                 found_modifiers.append(mod_def)
         
-        # ذخیره با توجه به احتمال overloading
-        # اگر function قبلاً وجود دارد، آن را override می‌کنیم
-        # (در Solidity overloading کم است)
+         
         function_modifiers_map[func_name] = {
             'modifiers': found_modifiers,
             'has_params': bool(func_params.strip()),
@@ -52,8 +42,7 @@ def extract_modifiers_from_source(sol_file_path):
             'signature_snippet': modifiers_section.strip()[:50]
         }
         
-        # تشخیص visibility
-        for vis in ['public', 'private', 'internal', 'external']:
+         for vis in ['public', 'private', 'internal', 'external']:
             if vis in modifiers_section:
                 function_modifiers_map[func_name]['visibility'] = vis
                 break
@@ -68,11 +57,9 @@ def update_path_database_with_modifiers(contract_address, base_dir, debug=True):
     """
     Update path database با modifier data از source
     """
-    # مسیرها
-    path_db_file = os.path.join(base_dir, 'path_databases1', f'{contract_address}_path_database.json')
+     path_db_file = os.path.join(base_dir, 'path_databases1', f'{contract_address}_path_database.json')
 
-    # پیدا کردن source file
-    sol_file = None
+     sol_file = None
     for dir_name in ['Safe_contract_clean', 'Vulnerable_contract_clean']:
         potential_path = os.path.join(base_dir, dir_name, f'{contract_address}.sol')
         if os.path.exists(potential_path):
@@ -81,28 +68,25 @@ def update_path_database_with_modifiers(contract_address, base_dir, debug=True):
     
     if not sol_file:
         if debug:
-            print(f"❌ Source file not found for {contract_address[:10]}")
+            print(f" Source file not found for {contract_address[:10]}")
         return False
     
-    # خواندن path database
-    try:
+     try:
         with open(path_db_file, 'r', encoding='utf-8') as f:
             path_db = json.load(f)
     except:
         if debug:
-            print(f"❌ Cannot read path database for {contract_address[:10]}")
+            print(f"Cannot read path database for {contract_address[:10]}")
         return False
     
-    # استخراج modifiers از source
-    source_data = extract_modifiers_from_source(sol_file)
+     source_data = extract_modifiers_from_source(sol_file)
     
     if debug:
-        print(f"\n📋 Contract: {contract_address[:10]}")
+        print(f"\n Contract: {contract_address[:10]}")
         print(f"   Modifier definitions: {source_data['modifier_definitions'][:5]}")
         print(f"   Functions with modifiers: {sum(1 for f in source_data['function_modifiers'].values() if f['modifiers'])}")
     
-    # Update هر path
-    update_stats = {
+     update_stats = {
         'paths_updated': 0,
         'functions_matched': set(),
         'functions_not_found': set(),
@@ -125,15 +109,13 @@ def update_path_database_with_modifiers(contract_address, base_dir, debug=True):
                 path['function_context']['modifier_names'] = new_modifiers
                 path['function_context']['function_has_modifier'] = len(new_modifiers) > 0
                 
-                # Update visibility اگر بهتر از قبلی است
-                if func_data['visibility'] != 'unknown':
+                 if func_data['visibility'] != 'unknown':
                     path['function_context']['function_visibility'] = func_data['visibility']
                 
                 # Update aggregate features
                 path['aggregate_features']['has_modifier_protection'] = int(len(new_modifiers) > 0)
                 
-                # بررسی protective modifiers
-                protective_modifiers = ['onlyOwner', 'onlyAdmin', 'onlyController', 
+                 protective_modifiers = ['onlyOwner', 'onlyAdmin', 'onlyController', 
                                       'onlyMinter', 'onlyPauser', 'onlyRole', 'auth']
                 has_protective = any(
                     any(prot in mod.lower() for prot in ['only', 'auth', 'admin', 'owner'])
@@ -149,18 +131,17 @@ def update_path_database_with_modifiers(contract_address, base_dir, debug=True):
                     func_data['visibility'] in ['private', 'internal']
                 )
                 
-                # آمار
-                update_stats['paths_updated'] += 1
+                 update_stats['paths_updated'] += 1
                 update_stats['functions_matched'].add(primary_func)
                 for mod in new_modifiers:
                     update_stats['modifiers_added'][mod] += 1
                 
                 if debug and old_modifiers != new_modifiers:
-                    print(f"   ✅ Updated {primary_func}: {old_modifiers} → {new_modifiers}")
+                    print(f"    Updated {primary_func}: {old_modifiers} → {new_modifiers}")
             else:
                 update_stats['functions_not_found'].add(primary_func)
                 if debug and primary_func not in ['', 'constructor', 'fallback']:
-                    print(f"   ⚠️ Function '{primary_func}' not found in source")
+                    print(f"   Function '{primary_func}' not found in source")
     
     # Update statistics در path database
     path_db['statistics']['paths_with_modifier'] = sum(
@@ -189,7 +170,7 @@ def update_path_database_with_modifiers(contract_address, base_dir, debug=True):
         json.dump(path_db, f, indent=2)
     
     if debug:
-        print(f"   📊 Update Stats:")
+        print(f"   Update Stats:")
         print(f"      Paths updated: {update_stats['paths_updated']}/{len(path_db['paths'])}")
         print(f"      Functions matched: {len(update_stats['functions_matched'])}")
         print(f"      Functions not found: {len(update_stats['functions_not_found'])}")
@@ -242,20 +223,19 @@ def batch_update_all_databases():
         else:
             global_stats['failed'] += 1
     
-    # گزارش نهایی
-    print("\n" + "="*80)
-    print("📊 FINAL INTEGRATION REPORT")
+     print("\n" + "="*80)
+    print(" FINAL INTEGRATION REPORT")
     print("="*80)
-    print(f"✅ Successful: {global_stats['successful']}/{len(db_files)}")
-    print(f"❌ Failed: {global_stats['failed']}/{len(db_files)}")
-    print(f"📈 Total paths updated: {global_stats['total_paths_updated']}")
+    print(f" Successful: {global_stats['successful']}/{len(db_files)}")
+    print(f" Failed: {global_stats['failed']}/{len(db_files)}")
+    print(f" Total paths updated: {global_stats['total_paths_updated']}")
     
-    print(f"\n🔐 Most common modifiers integrated:")
+    print(f"\n Most common modifiers integrated:")
     for mod, count in sorted(global_stats['total_modifiers_added'].items(), 
                             key=lambda x: x[1], reverse=True)[:10]:
         print(f"   - {mod}: {count} occurrences")
 
-    print(f"\n💾 Updated databases saved in: path_databases_updated1/")
+    print(f"\n Updated databases saved in: path_databases_updated1/")
 
 def validate_integration():
     """
@@ -267,7 +247,7 @@ def validate_integration():
     test_contract = '0x000000931cf36c464623bb0eefb6b0c205338d67'
     
     print("\n" + "="*80)
-    print("🔍 VALIDATION OF INTEGRATION")
+    print(" VALIDATION OF INTEGRATION")
     print("="*80)
     
     # مقایسه old و new
@@ -280,7 +260,7 @@ def validate_integration():
         new_db = json.load(f)
     
     # نمایش تغییرات
-    print(f"\n📊 Before/After Comparison:")
+    print(f"\n Before/After Comparison:")
     print(f"   Paths with modifiers:")
     print(f"      Before: {old_db['statistics'].get('paths_with_modifier', 0)}")
     print(f"      After:  {new_db['statistics'].get('paths_with_modifier', 0)}")
@@ -289,8 +269,7 @@ def validate_integration():
     print(f"      Before: {old_db['statistics'].get('paths_with_external_protection', 0)}")
     print(f"      After:  {new_db['statistics'].get('paths_with_external_protection', 0)}")
     
-    # نمونه paths با تغییرات
-    print(f"\n📝 Sample Path Changes:")
+     print(f"\n Sample Path Changes:")
     sample_count = 0
     for i, (old_path, new_path) in enumerate(zip(old_db['paths'][:10], new_db['paths'][:10])):
         old_mods = old_path['function_context'].get('modifier_names', [])
@@ -318,7 +297,7 @@ def validate_integration():
                                     key=lambda x: x[1], reverse=True)[:5]:
                 print(f"      - {mod}: {count} times")
     
-    print("\n✅ Integration validation complete!")
+    print("\n Integration validation complete!")
 
 
 if __name__ == "__main__":
