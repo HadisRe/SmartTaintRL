@@ -140,11 +140,11 @@ def batch_process_contracts():
     vuln_files = [f.replace('.sol', '') for f in os.listdir(vuln_dir)[:223]]
 
     print("=" * 70)
-    print("🚀 CONTRACT PROFILE GENERATION - PHASE 1")
-    print(f"📅 {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    print("CONTRACT PROFILE GENERATION - PHASE 1")
+    print(f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print("=" * 70)
     print(
-        f"📊 Processing: {len(safe_files)} Safe + {len(vuln_files)} Vulnerable = {len(safe_files) + len(vuln_files)} Total")
+        f" Processing: {len(safe_files)} Safe + {len(vuln_files)} Vulnerable = {len(safe_files) + len(vuln_files)} Total")
     print("-" * 70)
 
     results = {
@@ -172,20 +172,20 @@ def batch_process_contracts():
         if debug['ast_status'] == 'success':
             print(f"    ✓ AST: {profile['ast_features']['functions_count']} functions")
         else:
-            print(f"    ❌ AST: {debug['ast_status']}")
+            print(f"     AST: {debug['ast_status']}")
             status = 'partial' if status == 'success' else status
 
         if debug['graph_status'] == 'success':
             print(
-                f"    ✓ Graph: {profile['graph_statistics']['source_nodes']} sources, {profile['graph_statistics']['sink_nodes']} sinks")
+                f" Graph: {profile['graph_statistics']['source_nodes']} sources, {profile['graph_statistics']['sink_nodes']} sinks")
         else:
-            print(f"    ❌ Graph: {debug['graph_status']}")
+            print(f"     Graph: {debug['graph_status']}")
             status = 'partial' if status == 'success' else status
 
         if debug['taint_status'] == 'success':
             print(f"    ✓ Taint: {profile['taint_summary'].get('total_paths', 0)} paths")
         else:
-            print(f"    ❌ Taint: {debug['taint_status']}")
+            print(f"  Taint: {debug['taint_status']}")
             status = 'partial' if status == 'success' else status
 
         # ذخیره profile
@@ -193,23 +193,21 @@ def batch_process_contracts():
         with open(output_file, 'w', encoding='utf-8') as f:
             json.dump(profile, f, indent=2)
 
-        # ثبت نتیجه
-        if all([debug['ast_status'] == 'success',
+         if all([debug['ast_status'] == 'success',
                 debug['graph_status'] == 'success',
                 debug['taint_status'] == 'success']):
             results['successful'].append(address)
-            print(f"    ✅ Status: COMPLETE")
+            print(f" Status: COMPLETE")
         elif any([debug['ast_status'] == 'failed',
                   debug['graph_status'] == 'failed',
                   debug['taint_status'] == 'failed']):
             results['partial'].append(address)
-            print(f"    ⚠️ Status: PARTIAL")
+            print(f" Status: PARTIAL")
         else:
             results['failed'].append(address)
-            print(f"    ❌ Status: FAILED")
+            print(f"     Status: FAILED")
 
-        # آمار
-        label_key = 'safe' if label == 'safe' else 'vuln'
+         label_key = 'safe' if label == 'safe' else 'vuln'
         results['statistics'][label_key]['total'] += 1
         if status == 'success':
             results['statistics'][label_key]['success'] += 1
@@ -220,11 +218,11 @@ def batch_process_contracts():
 
     # گزارش نهایی
     print("\n" + "=" * 70)
-    print("📊 FINAL REPORT")
+    print(" FINAL REPORT")
     print("=" * 70)
-    print(f"✅ Complete Success: {len(results['successful'])}/40")
-    print(f"⚠️ Partial Success: {len(results['partial'])}/40")
-    print(f"❌ Failed: {len(results['failed'])}/40")
+    print(f" Complete Success: {len(results['successful'])}/40")
+    print(f" Partial Success: {len(results['partial'])}/40")
+    print(f" Failed: {len(results['failed'])}/40")
     print("\nBreakdown:")
     print(
         f"  Safe contracts: {results['statistics']['safe']['success']}/{results['statistics']['safe']['total']} success")
@@ -235,8 +233,8 @@ def batch_process_contracts():
     report_file = os.path.join(output_dir, 'generation_report.json')
     with open(report_file, 'w', encoding='utf-8') as f:
         json.dump(results, f, indent=2)
-    print(f"\n💾 Report saved to: generation_report.json")
-    print(f"💾 Profiles saved in: {output_dir}")
+    print(f"\n Report saved to: generation_report.json")
+    print(f" Profiles saved in: {output_dir}")
 
     return results
 
