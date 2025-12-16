@@ -4,9 +4,7 @@ from datetime import datetime
 
 
 def create_contract_profile_fixed(contract_address, label, base_dir):
-    """
-    ساخت پروفایل کامل برای یک contract با debug کامل
-    """
+     
     profile = {
         'address': contract_address,
         'label': label,
@@ -22,8 +20,7 @@ def create_contract_profile_fixed(contract_address, label, base_dir):
         }
     }
 
-    # مسیرهای فایل
-    ast_path = os.path.join(base_dir, 'contract_ast1_clean', f'{contract_address}_ast.json')
+     ast_path = os.path.join(base_dir, 'contract_ast1_clean', f'{contract_address}_ast.json')
     graph_path = os.path.join(base_dir, 'contract_ast1_clean', f'{contract_address}_semantic_graph.json')
     taint_path = os.path.join(base_dir, 'contract_ast1_clean', f'{contract_address}_taint_analysis_filtered.json')
 
@@ -57,15 +54,14 @@ def create_contract_profile_fixed(contract_address, label, base_dir):
         profile['debug_info']['ast_status'] = 'failed'
         profile['debug_info']['errors'].append(f"AST: {str(e)[:100]}")
 
-    # 2. Graph Processing - با فیلدهای صحیح
+    # 2. Graph Processing  
     try:
         with open(graph_path, 'r', encoding='utf-8') as f:
             graph_data = json.load(f)
 
         if 'statistics' in graph_data:
             stats = graph_data['statistics']
-            # استفاده از فیلدهای صحیح
-            profile['graph_statistics'] = {
+             profile['graph_statistics'] = {
                 'source_nodes': stats.get('source_nodes', 0),
                 'sink_nodes': stats.get('sink_nodes', 0),
                 'total_nodes': stats.get('total_nodes', 0),
@@ -124,10 +120,8 @@ def create_contract_profile_fixed(contract_address, label, base_dir):
 
 
 def batch_process_contracts():
-    """
-    پردازش همه 40 contract با گزارش کامل
-    """
-    base_dir = r'C:\Users\Hadis\Documents\NewModel1'
+     
+     base_dir = r'C:\Users\Hadis\Documents\NewModel1'
     safe_dir = os.path.join(base_dir, 'Safe_contract_clean')
     vuln_dir = os.path.join(base_dir, 'Vulnerable_contract_clean')
     output_dir = os.path.join(base_dir, 'contract_profiles1')
@@ -157,7 +151,7 @@ def batch_process_contracts():
         }
     }
 
-    # پردازش contracts
+    # process contracts
     all_contracts = [(addr, 'safe') for addr in safe_files] + [(addr, 'vulnerable') for addr in vuln_files]
 
     for i, (address, label) in enumerate(all_contracts, 1):
@@ -170,7 +164,7 @@ def batch_process_contracts():
         status = 'success'
 
         if debug['ast_status'] == 'success':
-            print(f"    ✓ AST: {profile['ast_features']['functions_count']} functions")
+            print(f"  AST: {profile['ast_features']['functions_count']} functions")
         else:
             print(f"     AST: {debug['ast_status']}")
             status = 'partial' if status == 'success' else status
@@ -183,12 +177,12 @@ def batch_process_contracts():
             status = 'partial' if status == 'success' else status
 
         if debug['taint_status'] == 'success':
-            print(f"    ✓ Taint: {profile['taint_summary'].get('total_paths', 0)} paths")
+            print(f"  Taint: {profile['taint_summary'].get('total_paths', 0)} paths")
         else:
             print(f"  Taint: {debug['taint_status']}")
             status = 'partial' if status == 'success' else status
 
-        # ذخیره profile
+        # store profile
         output_file = os.path.join(output_dir, f'{address}_profile.json')
         with open(output_file, 'w', encoding='utf-8') as f:
             json.dump(profile, f, indent=2)
@@ -216,7 +210,7 @@ def batch_process_contracts():
         else:
             results['statistics'][label_key]['failed'] += 1
 
-    # گزارش نهایی
+    # final report
     print("\n" + "=" * 70)
     print(" FINAL REPORT")
     print("=" * 70)
@@ -229,7 +223,7 @@ def batch_process_contracts():
     print(
         f"  Vuln contracts: {results['statistics']['vuln']['success']}/{results['statistics']['vuln']['total']} success")
 
-    # ذخیره گزارش
+    # store report
     report_file = os.path.join(output_dir, 'generation_report.json')
     with open(report_file, 'w', encoding='utf-8') as f:
         json.dump(results, f, indent=2)
