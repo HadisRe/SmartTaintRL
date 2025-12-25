@@ -1,7 +1,5 @@
- 
-
-import gymnasium as gym  # تغییر از gym به gymnasium
-from gymnasium import spaces  # تغییر از gym.spaces
+import gymnasium as gym  # Changed from gym to gymnasium
+from gymnasium import spaces  # Changed from gym.spaces
 import numpy as np
 import logging
 from typing import Dict, Tuple, Optional, Any
@@ -22,7 +20,7 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class EpisodeInfo:
-    """اطلاعات episode برای tracking"""
+    """Episode information for tracking"""
     contract_address: str
     contract_label: str  # ground truth
     total_paths: int
@@ -38,7 +36,7 @@ class EpisodeInfo:
 
 class BadRandomnessEnv(gym.Env):
     """
-    محیط RL برای تشخیص Bad Randomness
+    RL environment for detecting Bad Randomness
 
     Action Space:
     - Discrete action (0 to 39):
@@ -122,7 +120,7 @@ class BadRandomnessEnv(gym.Env):
         logger.debug(f"Observation space: {self.observation_space}")
     def _extract_pattern_signature(self, path: Dict) -> Tuple:
         """
-        استخراج pattern signature از path برای pattern bank
+        Extract pattern signature from path for pattern bank
         Returns: tuple (source_type, sink_type, has_strong_mitigation)
         """
         features = path.get('aggregate_features', {})
@@ -154,7 +152,7 @@ class BadRandomnessEnv(gym.Env):
 
     def _update_pattern_bank(self, path: Dict, action_type: str) -> Dict:
         """
-        به‌روزرسانی pattern bank و محاسبه pattern statistics
+        Update pattern bank and calculate pattern statistics
         Returns: dict with pattern info for reward calculation
         """
         pattern_info = {
@@ -163,7 +161,7 @@ class BadRandomnessEnv(gym.Env):
             'uniqueness_score': 0.0
         }
 
-        # فقط برای ANALYZE patterns را track می‌کنیم
+        # Only track patterns for ANALYZE
         if action_type != 'ANALYZE':
             return pattern_info
 
@@ -195,12 +193,12 @@ class BadRandomnessEnv(gym.Env):
 
     def _calculate_importance_score(self, path: Dict, pattern_info: Dict) -> float:
         """
-        محاسبه importance score با تاکید قوی بر mitigation
+        Calculate importance score with strong emphasis on mitigation
         """
         features = path.get('aggregate_features', {})
         basic_info = path.get('basic_info', {})
 
-        # Component 1: Risk Level - وزن 30% (کاهش از 40%)
+        # Component 1: Risk Level - weight 30% (reduced from 40%)
         risk_level = basic_info.get('risk_level', 'UNKNOWN')
         if risk_level == 'HIGH':
             risk_level_score = 0.8
@@ -211,7 +209,7 @@ class BadRandomnessEnv(gym.Env):
         else:  # UNKNOWN
             risk_level_score = 0.4
 
-        # Component 2: Source-Sink combination - وزن 25% (کاهش از 30%)
+        # Component 2: Source-Sink combination - weight 25% (reduced from 30%)
         source_encoded = features.get('source_type_encoded', [0, 0, 0, 0])
         sink_encoded = features.get('sink_type_encoded', [0, 0, 0, 0])
 
@@ -261,20 +259,20 @@ class BadRandomnessEnv(gym.Env):
 
         source_sink_score = (source_risk + sink_risk) / 2.0
 
-        # Component 3: Pattern uniqueness - وزن 15% (کاهش از 20%)
+        # Component 3: Pattern uniqueness - weight 15% (reduced from 20%)
         uniqueness_score = pattern_info.get('uniqueness_score', 0.5)
 
-        # Component 4: Mitigation - وزن 30% (افزایش از 10%)
+        # Component 4: Mitigation - weight 30% (increased from 10%)
         mitigation_score = features.get('mitigation_score', 0)
         require_density = features.get('require_density', 0)
         has_modifier = features.get('has_modifier_protection', 0)
         has_restricted_visibility = features.get('has_restricted_visibility', 0)
         has_external_protection = features.get('has_external_protection', 0)
 
-        # محاسبه mitigation قوی‌تر
+        # Calculate stronger mitigation
         mitigation_factor = 0.0
 
-        # هر نوع mitigation امتیاز مستقل دارد
+        # Each type of mitigation has independent score
         if has_modifier == 1:
             mitigation_factor += 0.3
         if require_density > 0.5:
@@ -290,24 +288,24 @@ class BadRandomnessEnv(gym.Env):
         if has_external_protection == 1:
             mitigation_factor += 0.2
 
-        # Cap mitigation در 1.0
+        # Cap mitigation at 1.0
         mitigation_factor = min(mitigation_factor, 1.0)
 
-        # محاسبه base importance بدون mitigation
+        # Calculate base importance without mitigation
         base_importance = (risk_level_score * 0.3 +
                            source_sink_score * 0.25 +
                            uniqueness_score * 0.15)
 
-        # اعمال mitigation به صورت multiplicative (نه additive)
-        # این باعث می‌شود mitigation قوی واقعاً importance را کاهش دهد
+        # Apply mitigation multiplicatively (not additively)
+        # This ensures strong mitigation actually reduces importance
         importance = base_importance * (1 - mitigation_factor * 0.7)
 
-        # اضافه کردن noise کوچک
+        # Add small noise
         import random
         importance += random.uniform(-0.02, 0.02)
 
-        # حذف حد پایین برای HIGH risk با strong mitigation
-        # فقط از 0.05 به عنوان حد پایین مطلق استفاده می‌کنیم
+        # Remove lower bound for HIGH risk with strong mitigation
+        # Only use 0.05 as absolute lower bound
         importance = max(0.05, min(1.0, importance))
 
         if self.debug_mode:
@@ -323,14 +321,14 @@ class BadRandomnessEnv(gym.Env):
 
     def reset(self) -> Tuple[np.ndarray, Dict]:
         """
-        شروع episode جدید
+        Start new episode
         Returns:
             tuple: (initial_state, info_dict)
         """
         self.current_episode += 1
         logger.info(f"=== Starting Episode {self.current_episode} ===")
 
-        # انتخاب contract تصادفی
+        # Select random contract
         contracts = self.data_loader.get_valid_contracts()
         if not contracts:
             raise ValueError("No valid contracts available")
@@ -384,10 +382,10 @@ class BadRandomnessEnv(gym.Env):
 
     def step(self, action: Tuple[int, str]) -> Tuple[np.ndarray, float, bool, Dict]:
         """
-        اجرای action با format جدید: (path_index, action_type)
+        Execute action with new format: (path_index, action_type)
 
         Args:
-            action: tuple از (path_index, action_type) که action_type یکی از 'ANALYZE' یا 'SKIP' است
+            action: tuple of (path_index, action_type) where action_type is either 'ANALYZE' or 'SKIP'
 
         Returns:
             tuple: (next_state, reward, done, info)
@@ -468,7 +466,7 @@ class BadRandomnessEnv(gym.Env):
             'budget_remaining': self.budget,
             'paths_analyzed': self.episode_info.paths_analyzed,
             'paths_skipped': self.episode_info.paths_skipped,
-            'valid_paths': len(self.pool_state.current_pool),  # برای agent
+            'valid_paths': len(self.pool_state.current_pool),  # for agent
         }
 
         # Track action history
@@ -479,7 +477,7 @@ class BadRandomnessEnv(gym.Env):
 
     def _calculate_calibrated_pattern_score(self, path: Dict) -> float:
         """
-        محاسبه pattern score با weights کالیبره شده
+        Calculate pattern score with calibrated weights
         """
         import pickle
         import numpy as np
@@ -495,7 +493,7 @@ class BadRandomnessEnv(gym.Env):
                 # Fallback to simple scoring
                 return self._calculate_pattern_score(path)
 
-        # Extract features (همان 25 features)
+        # Extract features (same 25 features)
         features = []
         agg = path.get('aggregate_features', {})
 
@@ -526,7 +524,7 @@ class BadRandomnessEnv(gym.Env):
 
     def _calculate_pattern_score(self, path: Dict) -> float:
         """
-        محاسبه pattern score با وزن‌های اصلاح شده
+        Calculate pattern score with adjusted weights
         """
         features = path.get('aggregate_features', {})
 
@@ -535,7 +533,7 @@ class BadRandomnessEnv(gym.Env):
 
         # Source scoring
         source_encoded = features.get('source_type_encoded', [0, 0, 0, 0])
-        vuln_score += sum(source_encoded) * 2.0  # ساده: هر source = 2 امتیاز
+        vuln_score += sum(source_encoded) * 2.0  # simple: each source = 2 points
 
         # Sink scoring
         sink_encoded = features.get('sink_type_encoded', [0, 0, 0, 0])
@@ -546,9 +544,9 @@ class BadRandomnessEnv(gym.Env):
         else:
             vuln_score += 1.0
 
-        # Protection - وزن کمتر
+        # Protection - lower weight
         if features.get('has_modifier_protection', 0) == 1:
-            safe_score += 0.5  # از 3.0 به 0.5
+            safe_score += 0.5  # reduced from 3.0 to 0.5
         if features.get('require_density', 0) > 0.5:
             safe_score += 0.5
 
@@ -570,7 +568,7 @@ class BadRandomnessEnv(gym.Env):
             return -3.0  # Avoid analyzing obvious LOW risk
 
         # Level 2: Importance-Based Core Reward
-        median_importance = 0.27  # از داده واقعی شما
+        median_importance = 0.27  # from your actual data
         if action_type == 'ANALYZE':
             # Positive reward if importance > median, negative if below
             reward = (importance - median_importance) * 25
@@ -600,7 +598,7 @@ class BadRandomnessEnv(gym.Env):
         return np.clip(reward, -12.0, 12.0)
 
     def _handle_analyze(self, path_index: int, path_risk: str):
-        """Handle ANALYZE action با refill خودکار"""
+        """Handle ANALYZE action with automatic refill"""
         self.episode_info.paths_analyzed += 1
 
         # Remove from pool
@@ -608,7 +606,7 @@ class BadRandomnessEnv(gym.Env):
             del self.pool_state.current_pool[path_index]
             logger.debug(f"Path {path_index} analyzed (risk={path_risk})")
 
-        # همیشه pool را پر نگه دار
+        # Always keep pool filled
         min_pool_size = max(10, len(self.pool_state.current_pool))
         while len(self.pool_state.current_pool) < min_pool_size and len(self.pool_state.available_paths) > 0:
             new_path = self.pool_state.available_paths.pop(0)
@@ -619,15 +617,15 @@ class BadRandomnessEnv(gym.Env):
                 f"Pool size: {len(self.pool_state.current_pool)}, Available: {len(self.pool_state.available_paths)}")
 
     def _handle_skip(self, path_index: int, path_risk: str):
-        """Handle SKIP action با حذف path"""
+        """Handle SKIP action with path removal"""
         self.episode_info.paths_skipped += 1
 
-        # حذف path که skip شده
+        # Remove skipped path
         if path_index < len(self.pool_state.current_pool):
             del self.pool_state.current_pool[path_index]
             logger.debug(f"Path {path_index} skipped and removed (risk={path_risk})")
 
-        # همیشه pool را پر نگه دار
+        # Always keep pool filled
         min_pool_size = max(10, len(self.pool_state.current_pool))
         while len(self.pool_state.current_pool) < min_pool_size and len(self.pool_state.available_paths) > 0:
             new_path = self.pool_state.available_paths.pop(0)
@@ -665,7 +663,7 @@ class BadRandomnessEnv(gym.Env):
 
     def _get_valid_action_mask(self) -> np.ndarray:
         """
-        ساخت mask برای valid actions در 10-action space
+        Build mask for valid actions in 10-action space
         """
         mask = np.zeros(self.action_space.n, dtype=bool)
         pool_size = len(self.pool_state.current_pool) if self.pool_state else 0
