@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class ContractData:
-    """ساختار داده برای نگهداری اطلاعات یک contract"""
+    """Data structure for holding contract information"""
     address: str
     label: str  # safe/vulnerable
     paths: List[Dict]
@@ -39,8 +39,8 @@ class ContractData:
 
 class ContractDataLoader:
     """
-    مسئول خواندن و مدیریت داده‌های contracts
-    این کلاس بخشی از محیط RL است و داده‌های مورد نیاز را فراهم می‌کند
+    Responsible for reading and managing contract data
+    This class is part of the RL environment and provides required data
     """
 
     def __init__(self,
@@ -56,9 +56,9 @@ class ContractDataLoader:
 
         """
         Args:
-            path_db_dir: مسیر فولدر path databases (با modifier info)
-            profile_dir: مسیر فولدر contract profiles
-            min_paths_required: حداقل paths مورد نیاز برای valid بودن contract
+            path_db_dir: path to path databases folder (with modifier info)
+            profile_dir: path to contract profiles folder
+            min_paths_required: minimum required paths for a valid contract
         """
         self.path_db_dir = Path(path_db_dir)
         self.profile_dir = Path(profile_dir)
@@ -77,7 +77,7 @@ class ContractDataLoader:
         logger.info(f"DataLoader initialized with {len(self.valid_contracts)} valid contracts")
 
     def _validate_directories(self):
-        """بررسی وجود directories"""
+        """Check existence of directories"""
         if not self.path_db_dir.exists():
             raise FileNotFoundError(f"Path database directory not found: {self.path_db_dir}")
         if not self.profile_dir.exists():
@@ -94,7 +94,7 @@ class ContractDataLoader:
         logger.debug(f"Found {len(path_files)} path files and {len(profile_files)} profile files")
 
     def _initialize_valid_contracts(self):
-        """شناسایی و ذخیره contracts معتبر"""
+        """Identify and store valid contracts"""
         all_addresses = self._get_all_contract_addresses()
 
         for addr in all_addresses:
@@ -125,7 +125,7 @@ class ContractDataLoader:
         logger.info(f"Found {len(self.valid_contracts)} valid contracts")
 
     def _get_all_contract_addresses(self) -> List[str]:
-        """لیست همه contract addresses موجود"""
+        """List of all available contract addresses"""
         path_files = set(f.stem.replace("_path_database", "")
                          for f in self.path_db_dir.glob("*_path_database.json"))
         profile_files = set(f.stem.replace("_profile", "")
@@ -135,13 +135,13 @@ class ContractDataLoader:
 
     def load_contract(self, contract_address: str) -> Optional[ContractData]:
         """
-        خواندن داده‌های کامل یک contract
+        Load complete data for a contract
 
         Args:
-            contract_address: آدرس contract (با یا بدون 0x)
+            contract_address: contract address (with or without 0x)
 
         Returns:
-            ContractData object یا None در صورت خطا
+            ContractData object or None on error
         """
         # Normalize address
         if not contract_address.startswith("0x"):
@@ -196,7 +196,7 @@ class ContractDataLoader:
             return None
 
     def _validate_data_structure(self, path_data: Dict, profile_data: Dict) -> bool:
-        """بررسی صحت ساختار داده‌ها"""
+        """Validate data structure"""
         # Check path data
         if 'paths' not in path_data or not isinstance(path_data['paths'], list):
             logger.error("Invalid path data structure")
@@ -227,19 +227,19 @@ class ContractDataLoader:
 
     def get_valid_contracts(self, min_paths: int = 5) -> List[Tuple[str, int, str]]:
         """
-        لیست contracts معتبر با حداقل تعداد paths
+        List of valid contracts with minimum number of paths
 
         Args:
-            min_paths: حداقل تعداد paths مورد نیاز
+            min_paths: minimum required number of paths
 
         Returns:
             List of tuples: (contract_address, path_count, label)
         """
-        # اگر contracts load نشده، ابتدا load کن
+        # If contracts not loaded, load first
         if not hasattr(self, 'contracts'):
             self.contracts = {}
 
-            # خواندن همه path database files
+            # Read all path database files
             for file in os.listdir(self.path_db_dir):
                 if file.endswith('_path_database.json'):
                     address = file.replace('_path_database.json', '')
@@ -262,25 +262,25 @@ class ContractDataLoader:
                         logger.warning(f"No profile for {address}")
                         profile_data = {}
 
-                    # ذخیره contract data
+                    # Save contract data
                     self.contracts[address] = {
                         'paths': path_data.get('paths', []),
                         'profile': profile_data
                     }
 
-        # حالا فیلتر کنیم
+        # Now filter them
         valid_contracts = []
 
         for address, data in self.contracts.items():
             path_count = len(data['paths'])
             label = data['profile'].get('label', 'unknown')
 
-            # فیلتر contracts با paths کم
+            # Filter contracts with few paths
             if path_count < min_paths:
                 logger.debug(f"Skipping contract {address[:10]}... with only {path_count} paths")
                 continue
 
-            # فیلتر contracts بدون label
+            # Filter contracts without label
             if label == 'unknown':
                 logger.debug(f"Skipping contract {address[:10]}... with unknown label")
                 continue
@@ -289,7 +289,7 @@ class ContractDataLoader:
 
         logger.info(f"Found {len(valid_contracts)} valid contracts with >= {min_paths} paths")
 
-        # نمایش توزیع
+        # Display distribution
         safe_count = sum(1 for _, _, label in valid_contracts if label == 'safe')
         vuln_count = sum(1 for _, _, label in valid_contracts if label == 'vulnerable')
         logger.info(f"Distribution: {safe_count} safe, {vuln_count} vulnerable")
@@ -298,11 +298,11 @@ class ContractDataLoader:
 
 
     def get_contracts_by_label(self, label: str) -> List[str]:
-        """برگرداندن contracts با label مشخص"""
+        """Return contracts with specific label"""
         return [addr for addr, _, lbl in self.valid_contracts if lbl == label]
 
     def get_random_contract(self, label: Optional[str] = None) -> Optional[ContractData]:
-        """انتخاب تصادفی یک contract"""
+        """Randomly select a contract"""
         import random
 
         if label:
@@ -317,7 +317,7 @@ class ContractDataLoader:
         return self.load_contract(selected)
 
     def get_statistics(self) -> Dict:
-        """آمار کلی dataset"""
+        """General dataset statistics"""
         total_paths = sum(count for _, count, _ in self.valid_contracts)
         safe_count = sum(1 for _, _, label in self.valid_contracts if label == 'safe')
         vuln_count = len(self.valid_contracts) - safe_count
@@ -334,7 +334,7 @@ class ContractDataLoader:
 
     def extract_path_features(self, path: Dict) -> np.ndarray:
         """
-        استخراج feature vector از یک path
+        Extract feature vector from a path
         Returns: numpy array of features
         """
         features = path.get('aggregate_features', {})
@@ -369,6 +369,6 @@ class ContractDataLoader:
         return np.array(feature_vector, dtype=np.float32)
 
     def clear_cache(self):
-        """پاک کردن cache برای آزاد کردن حافظه"""
+        """Clear cache to free memory"""
         self.loaded_contracts.clear()
         logger.info("Cache cleared")
