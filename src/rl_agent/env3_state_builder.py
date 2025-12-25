@@ -1,8 +1,8 @@
-# state_builder.py (نسخه اصلاح شده کامل)
+# state_builder.py (Complete revised version)
 """
 State Vector Builder for RL Environment
-تبدیل pool و contract data به state vector برای agent
-نسخه Enhanced با 80 ویژگی برای هر path
+Convert pool and contract data to state vector for agent
+Enhanced version with 80 features per path
 """
 
 import numpy as np
@@ -22,14 +22,14 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class StateComponents:
-    """اجزای مختلف state vector"""
+    """Different components of state vector"""
     global_features: np.ndarray  # 8 dims
     pool_features: np.ndarray  # 1600 dims (20 paths × 80)
     contract_embedding: np.ndarray  # 64 dims
     pool_metadata: np.ndarray  # 8 dims
 
     def get_full_vector(self) -> np.ndarray:
-        """ترکیب همه components به یک vector"""
+        """Combine all components into one vector"""
         return np.concatenate([
             self.global_features,
             self.pool_features.flatten(),
@@ -40,7 +40,7 @@ class StateComponents:
 
 class StateBuilder:
     """
-    مسئول ساخت state vector از وضعیت محیط
+    Responsible for building state vector from environment state
     State Vector: 1680 dimensions total
     - Global: 8
     - Pool: 1600 (20 paths × 80 features)
@@ -50,13 +50,13 @@ class StateBuilder:
 
     def __init__(self):
         """
-        StateBuilder برای structured state representation
+        StateBuilder for structured state representation
         """
         self.max_paths = 20
         self.features_per_path = 100
-        self.state_dim = (20, 100)  # حالا یک tuple است، نه عدد
+        self.state_dim = (20, 100)  # Now it's a tuple, not a number
 
-        # For tracking progress (این‌ها برای compatibility)
+        # For tracking progress (these are for compatibility)
         self.episode_step = 0
         self.last_action = None
 
@@ -64,12 +64,12 @@ class StateBuilder:
 
     def _detect_critical_patterns(self, path: Dict) -> Dict[str, float]:
         """
-        تشخیص الگوهای بحرانی امنیتی
-        Returns: دیکشنری از pattern scores (0 یا 1)
+        Detect critical security patterns
+        Returns: Dictionary of pattern scores (0 or 1)
         """
         patterns = {}
 
-        # استخراج اطلاعات مورد نیاز
+        # Extract required information
         basic_info = path.get('basic_info', {})
         source_type = basic_info.get('source_type', '')
         sink_type = basic_info.get('sink_type', '')
@@ -126,8 +126,8 @@ class StateBuilder:
 
     def _extract_interaction_features(self, path: Dict) -> np.ndarray:
         """
-        استخراج interaction features بین عناصر مختلف
-        Returns: آرایه 20 بعدی
+        Extract interaction features between different elements
+        Returns: 20-dimensional array
         """
         features = []
 
@@ -185,38 +185,38 @@ class StateBuilder:
 
     def _extract_semantic_features(self, path: Dict) -> np.ndarray:
         """
-        استخراج ویژگی‌های معنایی از کد
-        Returns: آرایه 15 بعدی
+        Extract semantic features from code
+        Returns: 15-dimensional array
         """
         features = []
 
         graph_enrichment = path.get('graph_enrichment', {})
         nodes_detail = graph_enrichment.get('nodes_detail', [])
 
-        # جمع‌آوری تمام code snippets
+        # Collect all code snippets
         all_code = ' '.join([node.get('code_snippet', '') for node in nodes_detail]).lower()
 
-        # Feature 1-5: وجود کلمات کلیدی خاص (5 features)
+        # Feature 1-5: Presence of specific keywords (5 features)
         features.append(1.0 if 'keccak256' in all_code else 0.0)
         features.append(1.0 if 'transfer' in all_code else 0.0)
         features.append(1.0 if 'random' in all_code else 0.0)
         features.append(1.0 if 'now' in all_code or 'timestamp' in all_code else 0.0)
         features.append(1.0 if 'block.' in all_code else 0.0)
 
-        # Feature 6-10: انواع عملیات (5 features)
+        # Feature 6-10: Types of operations (5 features)
         features.append(1.0 if 'msg.sender' in all_code else 0.0)
         features.append(1.0 if 'msg.value' in all_code else 0.0)
         features.append(1.0 if 'require(' in all_code else 0.0)
         features.append(1.0 if 'assert(' in all_code else 0.0)
         features.append(1.0 if 'revert(' in all_code else 0.0)
 
-        # Feature 11-13: پیچیدگی کد (3 features)
+        # Feature 11-13: Code complexity (3 features)
         node_types = graph_enrichment.get('node_types_count', {})
         features.append(min(node_types.get('assignment', 0) / 10.0, 1.0))
         features.append(min(node_types.get('condition', 0) / 5.0, 1.0))
         features.append(min(node_types.get('require', 0) / 3.0, 1.0))
 
-        # Feature 14-15: توابع درگیر (2 features)
+        # Feature 14-15: Functions involved (2 features)
         functions = graph_enrichment.get('functions_involved', [])
         features.append(min(len(functions) / 5.0, 1.0))
         features.append(1.0 if 'random' in str(functions).lower() else 0.0)
@@ -225,12 +225,12 @@ class StateBuilder:
 
     def _extract_path_features(self, path: Dict) -> np.ndarray:
         """
-        استخراج واقعی features از path با استفاده از تمام اطلاعات موجود
-        Returns: آرایه 100 بعدی
+        Actual feature extraction from path using all available information
+        Returns: 100-dimensional array
         """
         all_features = []
 
-        # =============== بخش 1: ویژگی‌های اصلی (25) ===============
+        # =============== Section 1: Main features (25) ===============
         features = path.get('aggregate_features', {})
         basic_info = path.get('basic_info', {})
 
@@ -261,11 +261,11 @@ class StateBuilder:
         all_features.extend(source_encoded)
         all_features.extend(sink_encoded)
 
-        # =============== بخش 2: Modifier Context (15) ===============
+        # =============== Section 2: Modifier Context (15) ===============
         function_context = path.get('function_context', {})
         modifier_names = function_context.get('modifier_names', [])
 
-        # Specific modifiers که مهم هستند
+        # Specific modifiers that are important
         important_modifiers = [
             'onlyOwner', 'onlyAdmin', 'onlyMinter',
             'whenNotPaused', 'nonReentrant', 'lock',
@@ -275,7 +275,7 @@ class StateBuilder:
         for mod in important_modifiers:
             all_features.append(1.0 if mod in modifier_names else 0.0)
 
-        # تعداد کل modifiers
+        # Total number of modifiers
         all_features.append(min(len(modifier_names) / 3.0, 1.0))
 
         # Visibility encoding (5 features)
@@ -288,12 +288,12 @@ class StateBuilder:
             1.0 if visibility == '' else 0.0  # unknown
         ])
 
-        # =============== بخش 3: Sequence Analysis (20) ===============
+        # =============== Section 3: Sequence Analysis (20) ===============
         graph_enrichment = path.get('graph_enrichment', {})
         nodes_detail = graph_enrichment.get('nodes_detail', [])
         path_nodes = basic_info.get('path_nodes', [])
 
-        # موقعیت require nodes نسبت به operations حساس
+        # Position of require nodes relative to sensitive operations
         require_positions = []
         transfer_positions = []
         keccak_positions = []
@@ -307,21 +307,21 @@ class StateBuilder:
             elif node_type == 'keccak' or 'keccak' in node.get('code_snippet', ''):
                 keccak_positions.append(i / max(len(nodes_detail), 1))
 
-        # Features برای موقعیت‌ها
+        # Features for positions
         all_features.extend([
-            min(require_positions) if require_positions else 1.0,  # اولین require کجاست
-            max(require_positions) if require_positions else 0.0,  # آخرین require کجاست
-            min(transfer_positions) if transfer_positions else 1.0,  # اولین transfer
-            max(transfer_positions) if transfer_positions else 0.0,  # آخرین transfer
-            # آیا require قبل از transfer است؟
+            min(require_positions) if require_positions else 1.0,  # where is first require
+            max(require_positions) if require_positions else 0.0,  # where is last require
+            min(transfer_positions) if transfer_positions else 1.0,  # first transfer
+            max(transfer_positions) if transfer_positions else 0.0,  # last transfer
+            # Is require before transfer?
             1.0 if (require_positions and transfer_positions and
                     min(require_positions) < max(transfer_positions)) else 0.0,
-            # آیا همه transfers بعد از requires هستند؟
+            # Are all transfers after requires?
             1.0 if (require_positions and transfer_positions and
                     max(require_positions) < min(transfer_positions)) else 0.0,
         ])
 
-        # تحلیل functions involved
+        # Analysis of functions involved
         functions = graph_enrichment.get('functions_involved', [])
         all_features.extend([
             1.0 if 'random' in str(functions).lower() else 0.0,
@@ -332,7 +332,7 @@ class StateBuilder:
             1.0 if 'bet' in str(functions).lower() or 'gamble' in str(functions).lower() else 0.0,
         ])
 
-        # Node type distribution در sequence
+        # Node type distribution in sequence
         node_types = graph_enrichment.get('node_types_count', {})
         total_nodes = sum(node_types.values()) if node_types else 1
         all_features.extend([
@@ -356,7 +356,7 @@ class StateBuilder:
         else:
             all_features.extend([0.0, 0.0])
 
-        # =============== بخش 4: Code Pattern Analysis (20) ===============
+        # =============== Section 4: Code Pattern Analysis (20) ===============
         all_code = ' '.join([node.get('code_snippet', '') for node in nodes_detail]).lower()
 
         # Critical operations
@@ -380,7 +380,7 @@ class StateBuilder:
             1.0 if '%' in all_code else 0.0,  # modulo (often in random)
         ])
 
-        # =============== بخش 5: Risk Context (20) ===============
+        # =============== Section 5: Risk Context (20) ===============
         risk_factors = basic_info.get('_risk_content', [])
         mitigation_content = basic_info.get('_mitigation_content', [])
 
@@ -436,8 +436,8 @@ class StateBuilder:
     def build_state(self, contract: ContractData, pool_state: PoolState,
                     budget_used: float = 0.0, max_steps: int = 50) -> np.ndarray:
         """
-        ساخت structured state برای per-path Q-learning
-        Returns: array با shape (20, 100) - 20 paths, هر کدام 100 features
+        Build structured state for per-path Q-learning
+        Returns: array with shape (20, 100) - 20 paths, each with 100 features
         """
         max_paths = 20
         features_per_path = 100
@@ -447,7 +447,7 @@ class StateBuilder:
 
         # Fill features for each path in pool
         for i, path in enumerate(pool_state.current_pool[:max_paths]):
-            # استخراج 100 features برای این path
+            # Extract 100 features for this path
             path_features = self._extract_path_features(path)
 
             # Ensure correct size
@@ -459,8 +459,8 @@ class StateBuilder:
 
             state[i] = path_features
 
-        # Paths که وجود ندارند با 0 پر می‌شوند (padding)
-        # این به network می‌گوید که این slots خالی هستند
+        # Paths that don't exist are filled with 0 (padding)
+        # This tells the network that these slots are empty
 
         logger.debug(f"Structured state built: shape={state.shape}, "
                      f"active paths={len(pool_state.current_pool)}")
@@ -470,11 +470,11 @@ class StateBuilder:
     def build_state_with_metadata(self, contract: ContractData, pool_state: PoolState,
                                   budget_used: float = 0.0, max_steps: int = 50) -> Tuple[np.ndarray, List[Dict]]:
         """
-        ساخت structured state همراه با metadata برای localization
+        Build structured state along with metadata for localization
 
         Returns:
-            state: array با shape (20, 100) - همان state معمولی
-            metadata: لیست از دیکشنری‌های metadata برای هر path
+            state: array with shape (20, 100) - same as regular state
+            metadata: list of metadata dictionaries for each path
         """
         max_paths = 20
         features_per_path = 100
@@ -485,7 +485,7 @@ class StateBuilder:
 
         # Fill features and metadata for each path in pool
         for i, path in enumerate(pool_state.current_pool[:max_paths]):
-            # استخراج features (همان روال قبلی)
+            # Extract features (same procedure as before)
             path_features = self._extract_path_features(path)
 
             # Ensure correct size
@@ -497,12 +497,12 @@ class StateBuilder:
 
             state[i] = path_features
 
-            # استخراج metadata برای localization
+            # Extract metadata for localization
             basic_info = path.get('basic_info', {})
             graph_enrichment = path.get('graph_enrichment', {})
             nodes_detail = graph_enrichment.get('nodes_detail', [])
 
-            # ساخت metadata برای این path
+            # Build metadata for this path
             path_metadata = {
                 'path_id': path.get('id', f'path_{i}'),
                 'contract_address': contract.address if hasattr(contract, 'address') else 'unknown',
@@ -513,7 +513,7 @@ class StateBuilder:
                 'nodes': []
             }
 
-            # استخراج اطلاعات هر node در path
+            # Extract information for each node in path
             for node_idx, node in enumerate(nodes_detail):
                 node_metadata = {
                     'node_index': node_idx,
@@ -530,7 +530,7 @@ class StateBuilder:
 
             metadata_list.append(path_metadata)
 
-        # برای paths که وجود ندارند (padding)، metadata خالی اضافه می‌کنیم
+        # For paths that don't exist (padding), add empty metadata
         while len(metadata_list) < max_paths:
             metadata_list.append(None)
 
@@ -705,7 +705,7 @@ class StateBuilder:
                                budget_used: float,
                                max_steps: int) -> np.ndarray:
         """
-        ساخت global features (8 dimensions)
+        Build global features (8 dimensions)
         """
         total_paths = (len(pool_state.current_pool) +
                        len(pool_state.explored_paths) +
@@ -740,13 +740,13 @@ class StateBuilder:
 
     def _build_pool_features(self, current_pool: List[Dict]) -> np.ndarray:
         """
-        ساخت pool features (1600 dimensions = 20 paths × 80 features)
+        Build pool features (1600 dimensions = 20 paths × 80 features)
         """
         pool_features = np.zeros((self.max_pool_size, self.path_features_dim),
                                  dtype=np.float32)
 
         for i, path in enumerate(current_pool[:self.max_pool_size]):
-            # استخراج 80 features از path با متد جدید
+            # Extract 80 features from path with new method
             path_vector = self._extract_path_features(path)
 
             # Validation
@@ -773,8 +773,8 @@ class StateBuilder:
 
     def _build_contract_embedding(self, contract: ContractData) -> np.ndarray:
         """
-        ساخت contract embedding (64 dimensions)
-        توجه: label و risk_distribution را include نمی‌کنیم (information leak)
+        Build contract embedding (64 dimensions)
+        Note: We don't include label and risk_distribution (information leak)
         """
         embedding = []
 
@@ -809,7 +809,7 @@ class StateBuilder:
         embedding.extend([0.0] * 8)
 
         # 3. Path features from profile (20 dims)
-        # توجه: فقط total_paths و avg_mitigations، نه risk_distribution!
+        # Note: only total_paths and avg_mitigations, not risk_distribution!
         taint_summary = contract.profile.get('taint_summary', {})
         embedding.extend([
             taint_summary.get('total_paths', 0) / 100.0,
@@ -826,7 +826,7 @@ class StateBuilder:
             consolidated.get('require_density', 0),
             consolidated.get('modifier_usage', 0),
             consolidated.get('source_sink_ratio', 0),
-            # نه protection_coverage (ممکن است leak باشد)
+            # not protection_coverage (might be a leak)
         ])
 
         embedding = np.array(embedding[:self.contract_embedding_dim], dtype=np.float32)
@@ -843,7 +843,7 @@ class StateBuilder:
 
     def _build_pool_metadata(self, pool_state: PoolState) -> np.ndarray:
         """
-        ساخت pool metadata (8 dimensions)
+        Build pool metadata (8 dimensions)
         """
         total_paths = (len(pool_state.current_pool) +
                        len(pool_state.explored_paths) +
@@ -883,19 +883,19 @@ class StateBuilder:
         return metadata
 
     def update_step(self, action: str):
-        """به‌روزرسانی برای step بعدی"""
+        """Update for next step"""
         self.episode_step += 1
         self.last_action = action
         logger.debug(f"Step updated: {self.episode_step}, last_action={action}")
 
     def reset(self):
-        """Reset برای episode جدید"""
+        """Reset for new episode"""
         self.episode_step = 0
         self.last_action = None
         logger.debug("StateBuilder reset for new episode")
 
     def get_state_info(self) -> Dict:
-        """اطلاعات debug درباره enhanced state"""
+        """Debug information about enhanced state"""
         return {
             'state_dim': self.state_dim,
             'max_pool_size': self.max_pool_size,
