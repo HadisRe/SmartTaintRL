@@ -1,18 +1,4 @@
-"""
-Vulnerability localizer for SmartTaintRL.
 
-Given a trained DQN checkpoint and a contract's path database, the localizer
-ranks (i) functions that are likely to contain a Bad Randomness flaw and
-(ii) individual nodes inside those functions. Node scores combine four
-signals:
-
-    final_score(n) = alpha * gradient(n)
-                   + beta  * attention(n)
-                   + gamma * propagation(n)
-                   + delta * centrality(n)
-
-Setting any weight to zero disables the corresponding channel.
-"""
 
 from collections import defaultdict
 from pathlib import Path
