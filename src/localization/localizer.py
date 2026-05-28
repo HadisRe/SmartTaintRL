@@ -1,5 +1,4 @@
-
-
+ 
 from collections import defaultdict
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
@@ -140,6 +139,17 @@ class VulnerabilityLocalizer:
 
     # -------------------------------------------------------------- Features
 
+    @staticmethod
+    def _nodes_of(path: Dict) -> List[Dict]:
+        """Return a path's node details.
+
+        Depending on the pre-processing version, the node list lives either
+        directly under the path or nested inside `graph_enrichment`.
+        """
+        if path.get('nodes_detail'):
+            return path['nodes_detail']
+        return path.get('graph_enrichment', {}).get('nodes_detail', []) or []
+
     # 100-dim feature layout used by the training pipeline (see
     # rl_agent.env3_state_builder.StateBuilder._extract_path_features). If
     # the layout there changes, mirror the change below.
@@ -213,8 +223,7 @@ class VulnerabilityLocalizer:
         ])
 
         # ---------- Section 3: sequence analysis (20) ----------
-        graph_enrichment = path.get('graph_enrichment', {}) or {}
-        nodes_detail = graph_enrichment.get('nodes_detail', []) or []
+        nodes_detail = self._nodes_of(path)
         n_total = max(len(nodes_detail), 1)
 
         req_pos, tr_pos, kk_pos = [], [], []
@@ -238,7 +247,7 @@ class VulnerabilityLocalizer:
             1.0 if (req_pos and tr_pos and max(req_pos) < min(tr_pos)) else 0.0,
         ])
 
-        funcs = str(graph_enrichment.get('functions_involved', '')).lower()
+        funcs = ' '.join((n.get('function') or '') for n in nodes_detail).lower()
         feats.extend([
             1.0 if 'random'   in funcs else 0.0,
             1.0 if 'transfer' in funcs else 0.0,
@@ -248,7 +257,9 @@ class VulnerabilityLocalizer:
             1.0 if ('bet' in funcs or 'gamble' in funcs) else 0.0,
         ])
 
-        ntc = graph_enrichment.get('node_types_count', {}) or {}
+        ntc: Dict[str, int] = defaultdict(int)
+        for n in nodes_detail:
+            ntc[(n.get('type') or 'unknown').lower()] += 1
         ntc_total = sum(ntc.values()) if ntc else 1
         feats.extend([
             ntc.get('require',    0) / ntc_total,
@@ -409,8 +420,7 @@ class VulnerabilityLocalizer:
 
         for path_idx, path in enumerate(paths):
             grad = gradients_per_path[path_idx]
-            graph_enrichment = path.get('graph_enrichment', {}) or {}
-            nodes_detail = graph_enrichment.get('nodes_detail', []) or []
+            nodes_detail = self._nodes_of(path)
             basic_info = path.get('basic_info', {}) or {}
             source_node = basic_info.get('source_node', '')
             sink_node = basic_info.get('sink_node', '')
@@ -457,8 +467,7 @@ class VulnerabilityLocalizer:
         """Spread each path's attention weight uniformly across its nodes."""
         node_scores: Dict[str, float] = defaultdict(float)
         for path_idx, path in enumerate(paths):
-            graph_enrichment = path.get('graph_enrichment', {}) or {}
-            nodes_detail = graph_enrichment.get('nodes_detail', []) or []
+            nodes_detail = self._nodes_of(path)
             if not nodes_detail:
                 continue
             w = float(attention_per_path[path_idx]) / len(nodes_detail)
@@ -504,7 +513,7 @@ class VulnerabilityLocalizer:
         for path in paths:
             for nid in path.get('basic_info', {}).get('path_nodes', []) or []:
                 path_node_ids.add(str(nid))
-            for nd in path.get('graph_enrichment', {}).get('nodes_detail', []) or []:
+            for nd in self._nodes_of(path):
                 nid = nd.get('node_id') or nd.get('id')
                 if nid:
                     path_node_ids.add(str(nid))
