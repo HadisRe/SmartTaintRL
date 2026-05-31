@@ -63,7 +63,7 @@ def evaluate_configuration(localizer: VulnerabilityLocalizer,
         gt_function = info.get('function', '')
         gt_nodes = info.get('nodes') or info.get('vulnerable_nodes') or []
 
-        path_db_file = path_db_dir / f"{address}_path_database.json"
+        path_db_file = path_db_dir / f"{address}_enriched_paths.json"
         path_db = localizer.load_path_database(str(path_db_file))
         if not path_db:
             if verbose:
