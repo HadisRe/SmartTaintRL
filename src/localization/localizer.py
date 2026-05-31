@@ -111,8 +111,14 @@ class VulnerabilityLocalizer:
         model = DQN(path_features_dim=100)
         checkpoint = torch.load(path, map_location=self.device, weights_only=False)
 
-        if isinstance(checkpoint, dict) and 'model_state_dict' in checkpoint:
-            state_dict = checkpoint['model_state_dict']
+        if isinstance(checkpoint, dict):
+            for key in ('q_network_state_dict', 'model_state_dict',
+                        'state_dict', 'q_network'):
+                if key in checkpoint:
+                    state_dict = checkpoint[key]
+                    break
+            else:
+                state_dict = checkpoint
         else:
             state_dict = checkpoint
 
