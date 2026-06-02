@@ -1,4 +1,5 @@
  
+
 from collections import defaultdict
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
@@ -112,18 +113,20 @@ class VulnerabilityLocalizer:
         checkpoint = torch.load(path, map_location=self.device, weights_only=False)
 
         if isinstance(checkpoint, dict):
-            for key in ('q_network_state_dict', 'model_state_dict',
-                        'state_dict', 'q_network'):
-                if key in checkpoint:
-                    state_dict = checkpoint[key]
-                    break
+            # Training pipeline saves a dict with multiple state_dicts; prefer
+            # the online q-network, fall back to the target network or to a
+            # plain model_state_dict for older checkpoints.
+            if 'q_network_state_dict' in checkpoint:
+                state_dict = checkpoint['q_network_state_dict']
+            elif 'target_network_state_dict' in checkpoint:
+                state_dict = checkpoint['target_network_state_dict']
+            elif 'model_state_dict' in checkpoint:
+                state_dict = checkpoint['model_state_dict']
             else:
                 state_dict = checkpoint
         else:
             state_dict = checkpoint
 
-        # The training pipeline may save either the online or the target net;
-        # both share the same architecture so a plain load is sufficient.
         model.load_state_dict(state_dict)
         return model.to(self.device)
 
@@ -470,17 +473,53 @@ class VulnerabilityLocalizer:
 
     def _attention_to_nodes(self, attention_per_path: np.ndarray,
                             paths: List[Dict]) -> Dict[str, float]:
-        """Spread each path's attention weight uniformly across its nodes."""
+        """
+        Map per-path attention weights to per-node scores using a role-aware
+        intra-path redistribution.
+
+        The DQN's attention is computed at the path level: for each path we
+        only obtain a scalar saying how much the model focuses on that path
+        compared to others in the pool. Distributing this scalar uniformly
+        across the path's nodes would erase any per-node discrimination, so
+        instead we redistribute it according to each node's syntactic role
+        (source and sink receive the largest share, then keccak/transfer,
+        then require/condition, with structural assignments receiving the
+        least). The path-level totals are preserved, but inside a path the
+        attention is now concentrated on the nodes that carry the actual
+        randomness semantics.
+        """
         node_scores: Dict[str, float] = defaultdict(float)
         for path_idx, path in enumerate(paths):
             nodes_detail = self._nodes_of(path)
             if not nodes_detail:
                 continue
-            w = float(attention_per_path[path_idx]) / len(nodes_detail)
+
+            basic_info = path.get('basic_info', {}) or {}
+            source_node = str(basic_info.get('source_node') or '')
+            sink_node = str(basic_info.get('sink_node') or '')
+
+            path_attn = float(attention_per_path[path_idx])
+
+            # Role-based weight for every node on this path.
+            weights: Dict[str, float] = {}
             for node in nodes_detail:
                 node_id = node.get('node_id') or node.get('id') or ''
-                if node_id:
-                    node_scores[node_id] += w
+                if not node_id:
+                    continue
+                ntype = (node.get('type') or 'unknown').lower()
+                w = NODE_TYPE_WEIGHT.get(ntype, NODE_TYPE_WEIGHT['unknown'])
+                # Source and sink nodes always dominate intra-path attention.
+                if str(node_id) == source_node or str(node_id) == sink_node:
+                    w = 1.0
+                weights[node_id] = w
+
+            total_w = sum(weights.values())
+            if total_w <= 0:
+                continue
+
+            for node_id, w in weights.items():
+                node_scores[node_id] += path_attn * (w / total_w)
+
         return dict(node_scores)
 
     # ------------------------------------------- Graph-based score channels
@@ -543,13 +582,17 @@ class VulnerabilityLocalizer:
         return G
 
     def _propagation_scores(self, G: nx.DiGraph,
-                            gradient_scores: Dict[str, float],
                             paths: List[Dict]) -> Dict[str, float]:
         """
-        Bidirectional propagation on the subgraph: starting from sources
-        forward and from sinks backward, multiplied by `propagation_decay`
-        at every hop. The initial value of each seed node is its gradient
-        score.
+        Bidirectional propagation on the subgraph, encoding each node's
+        proximity to taint sources and sensitive sinks.
+
+        Starting from sources forward and from sinks backward, each seed
+        node is given an initial mass of 1.0, which is multiplied by
+        `propagation_decay` at every hop. The resulting score therefore
+        depends only on the graph topology and on which nodes are
+        sources/sinks; it is fully independent of the gradient channel,
+        which is essential for a meaningful ablation study.
         """
         if G.number_of_nodes() == 0:
             return {}
@@ -571,9 +614,10 @@ class VulnerabilityLocalizer:
             while frontier:
                 next_frontier = []
                 for u in frontier:
-                    seed_val = gradient_scores.get(u, 0.0)
                     decay = self.propagation_decay ** visited[u]
-                    prop[u] += seed_val * decay
+                    # Seed mass is a constant 1.0 (not the gradient): this
+                    # makes propagation a pure topology / role signal.
+                    prop[u] += decay
                     for v in graph.successors(u):
                         if v not in visited:
                             visited[v] = visited[u] + 1
@@ -602,6 +646,28 @@ class VulnerabilityLocalizer:
 
     # ------------------------------------------------------- Node ranking
 
+    @staticmethod
+    def _minmax_normalize(scores: Dict[str, float]) -> Dict[str, float]:
+        """
+        Min-max normalize a node-score dictionary to [0, 1].
+
+        The four scoring channels (gradient, attention, propagation,
+        centrality) live on very different numerical ranges by
+        construction. Without normalization, the channel with the largest
+        raw magnitude would systematically dominate the linear
+        combination, and the ablation weights alpha/beta/gamma/delta would
+        be meaningless. Rescaling each channel to a common [0, 1] interval
+        makes the four components directly comparable and turns the
+        ablation into a genuine measure of each channel's contribution.
+        """
+        if not scores:
+            return {}
+        values = list(scores.values())
+        vmin, vmax = min(values), max(values)
+        if vmax - vmin < 1e-10:
+            return {k: 0.0 for k in scores}
+        return {k: (v - vmin) / (vmax - vmin) for k, v in scores.items()}
+
     def localize_nodes(self, paths: List[Dict],
                        semantic_graph: Optional[Dict] = None,
                        top_k: int = 5) -> List[Tuple[str, float]]:
@@ -614,14 +680,23 @@ class VulnerabilityLocalizer:
 
         gradients, attention, _ = self._per_path_signals(paths)
 
-        grad_scores = self._gradient_to_nodes(gradients, paths)
-        attn_scores = self._attention_to_nodes(attention, paths)
+        # Compute each channel independently.
+        grad_raw = self._gradient_to_nodes(gradients, paths)
+        attn_raw = self._attention_to_nodes(attention, paths)
 
         G = self._build_subgraph(paths, semantic_graph)
-        prop_scores = self._propagation_scores(G, grad_scores, paths)
-        cent_scores = self._centrality_scores(G)
+        prop_raw = self._propagation_scores(G, paths)
+        cent_raw = self._centrality_scores(G)
 
-        all_nodes = set(grad_scores) | set(attn_scores) | set(prop_scores) | set(cent_scores)
+        # Normalize every channel to [0, 1] so the alpha/beta/gamma/delta
+        # weights have a consistent meaning across the ablation grid.
+        grad_scores = self._minmax_normalize(grad_raw)
+        attn_scores = self._minmax_normalize(attn_raw)
+        prop_scores = self._minmax_normalize(prop_raw)
+        cent_scores = self._minmax_normalize(cent_raw)
+
+        all_nodes = (set(grad_scores) | set(attn_scores)
+                     | set(prop_scores) | set(cent_scores))
         final: Dict[str, float] = {}
         for nid in all_nodes:
             final[nid] = (self.alpha * grad_scores.get(nid, 0.0)
