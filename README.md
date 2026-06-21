@@ -13,8 +13,8 @@ SmartTaintRL is a framework that combines taint analysis with deep reinforcement
 ### Key Features
 
 - **High Accuracy**: Achieves F1-score of 0.955 on balanced datasets and 0.950 on imbalanced ones
-- **Efficient Path Pruning**: Reduces search space by 45% while maintaining 96% recall
-- **Precise Localization**: 92.9% function-level accuracy in identifying vulnerable code
+- **Efficient Path Pruning**: Reduces search space by 44.3% while maintaining 96% recall
+- **Precise Localization**: 78.6% function-level accuracy in identifying vulnerable code
 - **Robust to Class Imbalance**: Less than 1% F1 degradation under real-world conditions (95:5 ratio)
 
 ## Architecture
@@ -205,8 +205,8 @@ The localization module (`src/localization/`) implements this phase, providing r
 
 | Method | F1 (Balanced) | F1 (Imbalanced) | Time |
 |--------|---------------|-----------------|------|
-| Slither | 0.450 | - | 22min |
-| Mythril | 0.372 | - | >24h |
+| Slither | 0.232 | - | 22min |
+| Mythril | 0.236 | - | >24h |
 | TaintSentinel | 0.892 | 0.611 | 8.3h |
 | RNVulDet | 0.662 | 0.360 | 5.5h |
 | **SmartTaintRL** | **0.955** | **0.950** | **3h** |
@@ -235,7 +235,7 @@ To train the model from scratch, run the DQN agent with the path databases:
 python src/rl_agent/dqn_agent.py
 ```
 
-For optimal results, train the model for 2500 to 3500 episodes. Our experiments show that models trained within this range achieve the best balance between detection accuracy and generalization.
+The complete training runs for 4,500 episodes. In our experiments, the checkpoint at episode 2,500 gave the best balance between detection accuracy and generalization, and we use it as the default for evaluation.
 
 ### Running Localization
 
@@ -248,9 +248,9 @@ python src/localization/test_localization.py
 This will evaluate function-level and node-level localization on the 14 ground truth contracts. The localizer uses gradient-based attribution from the trained Q-network to identify vulnerable functions and nodes.
 
 Expected results (as reported in the paper):
-- Strict Accuracy: 64.3%
-- Relaxed Accuracy (with caller detection): 92.9%
-- Node-level P@5: 0.65, R@5: 0.77, F1@5: 0.70
+- Strict Accuracy: 57.1%
+- Relaxed Accuracy (with caller detection): 78.6%
+- Node-level P@5: 0.68, R@5: 0.80, F1@5: 0.73
 
 ## Related Work
 
