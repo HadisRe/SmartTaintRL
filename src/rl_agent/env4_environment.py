@@ -1,5 +1,5 @@
-import gymnasium as gym  # Changed from gym to gymnasium
-from gymnasium import spaces  # Changed from gym.spaces
+import gymnasium as gym
+from gymnasium import spaces
 import numpy as np
 import logging
 from typing import Dict, Tuple, Optional, Any
@@ -20,9 +20,9 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class EpisodeInfo:
-    """Episode information for tracking"""
+    """Episode-level tracking information."""
     contract_address: str
-    contract_label: str  # ground truth
+    contract_label: str  # ground-truth label
     total_paths: int
     steps: int = 0
     total_reward: float = 0.0
@@ -36,18 +36,17 @@ class EpisodeInfo:
 
 class BadRandomnessEnv(gym.Env):
     """
-    RL environment for detecting Bad Randomness
+    RL environment for Bad Randomness detection.
 
-    Action Space:
-    - Discrete action (0 to 39):
-      - 0-19: ANALYZE path at index
-      - 20-39: SKIP path at index
+    Action space:
+        Tuple(Discrete(20), Discrete(2)) -> (path_index, action_type)
+        action_type: 0 = ANALYZE, 1 = SKIP
 
-    State Space:
-    - Box(580,): state vector from StateBuilder
+    Observation space:
+        Box(20, 100): structured state matrix from StateBuilder.
 
     Reward:
-    - Based on action correctness and path risk level
+        Hierarchical reward based on action correctness and path risk level.
     """
 
     def __init__(self,
@@ -60,16 +59,16 @@ class BadRandomnessEnv(gym.Env):
                  debug_mode: bool = True):
 
         self.action_space = spaces.Tuple((
-            spaces.Discrete(20),  # path_index
-            spaces.Discrete(2)  # action_type: 0=ANALYZE, 1=SKIP
+            spaces.Discrete(20),  # path index
+            spaces.Discrete(2)    # action type: 0=ANALYZE, 1=SKIP
         ))
         self.observation_space = spaces.Box(
             low=-np.inf, high=np.inf,
-            shape=(20, 100),  # structured state
+            shape=(20, 100),      # structured state
             dtype=np.float32
         )
 
-        # Initialize components
+        # Core components
         self.data_loader = data_loader or ContractDataLoader()
         self.pool_manager = pool_manager or PoolManager()
         self.state_builder = state_builder or StateBuilder()
@@ -111,28 +110,27 @@ class BadRandomnessEnv(gym.Env):
         self.action_history = []
         self.reward_history = []
 
-        # Pattern tracking
+        # Pattern registry tracking
         self.pattern_bank = {}
         self.discovered_patterns = set()
 
         logger.info("Environment initialized with 2-action space")
         logger.debug(f"Action space: {self.action_space}")
         logger.debug(f"Observation space: {self.observation_space}")
+
     def _extract_pattern_signature(self, path: Dict) -> Tuple:
         """
-        Extract pattern signature from path for pattern bank
-        Returns: tuple (source_type, sink_type, has_strong_mitigation)
+        Build a pattern signature for the pattern registry.
+
+        Returns:
+            Tuple (source_type, sink_type, has_strong_mitigation).
         """
         features = path.get('aggregate_features', {})
         basic_info = path.get('basic_info', {})
 
-        # Get source type
         source_type = basic_info.get('source_type', 'unknown')
-
-        # Get sink type
         sink_type = basic_info.get('sink_type', 'unknown')
 
-        # Check for strong mitigation
         mitigation_score = features.get('mitigation_score', 0)
         require_density = features.get('require_density', 0)
         has_modifier = features.get('has_modifier_protection', 0)
@@ -152,8 +150,10 @@ class BadRandomnessEnv(gym.Env):
 
     def _update_pattern_bank(self, path: Dict, action_type: str) -> Dict:
         """
-        Update pattern bank and calculate pattern statistics
-        Returns: dict with pattern info for reward calculation
+        Update the pattern registry and compute pattern statistics.
+
+        Returns:
+            Dict with pattern info used for reward calculation.
         """
         pattern_info = {
             'is_new': False,
@@ -161,19 +161,19 @@ class BadRandomnessEnv(gym.Env):
             'uniqueness_score': 0.0
         }
 
-        # Only track patterns for ANALYZE
+        # Patterns are only tracked for ANALYZE decisions
         if action_type != 'ANALYZE':
             return pattern_info
 
         pattern = self._extract_pattern_signature(path)
 
-        # Check if new pattern
+        # Detect a newly discovered pattern
         if pattern not in self.discovered_patterns:
             pattern_info['is_new'] = True
             pattern_info['uniqueness_score'] = 1.0
             self.discovered_patterns.add(pattern)
 
-        # Update count
+        # Update observation count
         if pattern in self.pattern_bank:
             self.pattern_bank[pattern] += 1
         else:
@@ -181,7 +181,7 @@ class BadRandomnessEnv(gym.Env):
 
         pattern_info['repetition_count'] = self.pattern_bank[pattern]
 
-        # Calculate uniqueness based on repetition
+        # Uniqueness is the inverse of repetition frequency
         if pattern_info['repetition_count'] > 1:
             pattern_info['uniqueness_score'] = 1.0 / pattern_info['repetition_count']
 
@@ -193,12 +193,13 @@ class BadRandomnessEnv(gym.Env):
 
     def _calculate_importance_score(self, path: Dict, pattern_info: Dict) -> float:
         """
-        Calculate importance score with strong emphasis on mitigation
+        Compute a path importance score, combining risk level, source-sink
+        risk, pattern uniqueness, and mitigation strength.
         """
         features = path.get('aggregate_features', {})
         basic_info = path.get('basic_info', {})
 
-        # Component 1: Risk Level - weight 30% (reduced from 40%)
+        # Component 1: Risk level
         risk_level = basic_info.get('risk_level', 'UNKNOWN')
         if risk_level == 'HIGH':
             risk_level_score = 0.8
@@ -209,13 +210,13 @@ class BadRandomnessEnv(gym.Env):
         else:  # UNKNOWN
             risk_level_score = 0.4
 
-        # Component 2: Source-Sink combination - weight 25% (reduced from 30%)
+        # Component 2: Source-sink combination
         source_encoded = features.get('source_type_encoded', [0, 0, 0, 0])
         sink_encoded = features.get('sink_type_encoded', [0, 0, 0, 0])
 
         # Source scoring
         source_risk = 0.0
-        if source_encoded[0] == 1:  # timestamp
+        if source_encoded[0] == 1:    # timestamp
             source_risk = 0.9
         elif source_encoded[1] == 1:  # blocknumber
             source_risk = 0.8
@@ -238,11 +239,11 @@ class BadRandomnessEnv(gym.Env):
 
         # Sink scoring
         sink_risk = 0.0
-        if sink_encoded[0] == 1:  # valueTransfer
+        if sink_encoded[0] == 1:      # valueTransfer
             sink_risk = 1.0
-        elif sink_encoded[1] == 1:  # randomGeneration
+        elif sink_encoded[1] == 1:    # randomGeneration
             sink_risk = 0.8
-        elif sink_encoded[2] == 1:  # stateModification
+        elif sink_encoded[2] == 1:    # stateModification
             sink_risk = 0.6
         else:
             sink_type = basic_info.get('sink_type', 'unknown')
@@ -259,20 +260,18 @@ class BadRandomnessEnv(gym.Env):
 
         source_sink_score = (source_risk + sink_risk) / 2.0
 
-        # Component 3: Pattern uniqueness - weight 15% (reduced from 20%)
+        # Component 3: Pattern uniqueness
         uniqueness_score = pattern_info.get('uniqueness_score', 0.5)
 
-        # Component 4: Mitigation - weight 30% (increased from 10%)
+        # Component 4: Mitigation strength
         mitigation_score = features.get('mitigation_score', 0)
         require_density = features.get('require_density', 0)
         has_modifier = features.get('has_modifier_protection', 0)
         has_restricted_visibility = features.get('has_restricted_visibility', 0)
         has_external_protection = features.get('has_external_protection', 0)
 
-        # Calculate stronger mitigation
+        # Aggregate mitigation factor from independent protection signals
         mitigation_factor = 0.0
-
-        # Each type of mitigation has independent score
         if has_modifier == 1:
             mitigation_factor += 0.3
         if require_density > 0.5:
@@ -288,24 +287,22 @@ class BadRandomnessEnv(gym.Env):
         if has_external_protection == 1:
             mitigation_factor += 0.2
 
-        # Cap mitigation at 1.0
+        # Cap the mitigation factor
         mitigation_factor = min(mitigation_factor, 1.0)
 
-        # Calculate base importance without mitigation
+        # Base importance before mitigation
         base_importance = (risk_level_score * 0.3 +
                            source_sink_score * 0.25 +
                            uniqueness_score * 0.15)
 
-        # Apply mitigation multiplicatively (not additively)
-        # This ensures strong mitigation actually reduces importance
+        # Mitigation is applied multiplicatively so that strong protection
+        # reduces the overall importance of a path.
         importance = base_importance * (1 - mitigation_factor * 0.7)
 
-        # Add small noise
-        import random
+        # Small stochastic perturbation
         importance += random.uniform(-0.02, 0.02)
 
-        # Remove lower bound for HIGH risk with strong mitigation
-        # Only use 0.05 as absolute lower bound
+        # Clamp to a valid range
         importance = max(0.05, min(1.0, importance))
 
         if self.debug_mode:
@@ -318,17 +315,17 @@ class BadRandomnessEnv(gym.Env):
 
         return importance
 
-
     def reset(self) -> Tuple[np.ndarray, Dict]:
         """
-        Start new episode
+        Start a new episode.
+
         Returns:
-            tuple: (initial_state, info_dict)
+            Tuple (initial_state, info_dict).
         """
         self.current_episode += 1
         logger.info(f"=== Starting Episode {self.current_episode} ===")
 
-        # Select random contract
+        # Select a random contract
         contracts = self.data_loader.get_valid_contracts()
         if not contracts:
             raise ValueError("No valid contracts available")
@@ -339,7 +336,7 @@ class BadRandomnessEnv(gym.Env):
         if not self.current_contract:
             raise ValueError(f"Failed to load contract {selected_addr}")
 
-        # Initialize pool
+        # Initialize the path pool
         self.pool_state = self.pool_manager.initialize_pool(
             self.current_contract,
             self.current_episode
@@ -351,7 +348,6 @@ class BadRandomnessEnv(gym.Env):
         self.action_history = []
         self.reward_history = []
 
-
         # Initialize episode info
         self.episode_info = EpisodeInfo(
             contract_address=selected_addr,
@@ -359,7 +355,7 @@ class BadRandomnessEnv(gym.Env):
             total_paths=path_count
         )
 
-        # Build initial state
+        # Build the initial state
         state = self.state_builder.build_state(
             self.current_contract,
             self.pool_state,
@@ -367,7 +363,6 @@ class BadRandomnessEnv(gym.Env):
             max_steps=self.max_steps
         )
 
-        # Create info dict with action mask
         info = {
             'pool_size': len(self.pool_state.current_pool),
             'contract_address': selected_addr,
@@ -382,18 +377,17 @@ class BadRandomnessEnv(gym.Env):
 
     def step(self, action: Tuple[int, str]) -> Tuple[np.ndarray, float, bool, Dict]:
         """
-        Execute action with new format: (path_index, action_type)
+        Execute an action of the form (path_index, action_type).
 
         Args:
-            action: tuple of (path_index, action_type) where action_type is either 'ANALYZE' or 'SKIP'
+            action: Tuple (path_index, action_type), action_type in {'ANALYZE', 'SKIP'}.
 
         Returns:
-            tuple: (next_state, reward, done, info)
+            Tuple (next_state, reward, done, info).
         """
-        # Extract action components
         path_index, action_type = action
 
-        # Validate path index
+        # Validate the path index against the current pool
         pool_size = len(self.pool_state.current_pool)
         if pool_size == 0:
             logger.warning("Pool is empty")
@@ -403,11 +397,11 @@ class BadRandomnessEnv(gym.Env):
             logger.warning(f"Invalid path index {path_index}, pool size: {pool_size}")
             return self._handle_invalid_action()
 
-        # Get the selected path
+        # Retrieve the selected path
         path = self.pool_state.current_pool[path_index]
         path_risk = path.get('basic_info', {}).get('risk_level', 'UNKNOWN')
 
-        # Calculate importance for this path
+        # Compute importance for this path
         pattern_sig = self._extract_pattern_signature(path)
         pattern_info = {
             'is_new': pattern_sig not in self.discovered_patterns,
@@ -417,22 +411,19 @@ class BadRandomnessEnv(gym.Env):
         }
         importance = self._calculate_importance_score(path, pattern_info)
 
-        # Update pattern bank only for ANALYZE
+        # Update the pattern registry only for ANALYZE decisions
         if action_type == 'ANALYZE':
             pattern_info = self._update_pattern_bank(path, action_type)
             path['pattern_info'] = pattern_info
 
-        # Calculate reward
+        # Compute the reward
         reward = self._calculate_reward(action_type, path, path_risk, importance)
-
-
-
 
         if self.debug_mode:
             logger.info(f"Step {self.episode_info.steps}: {action_type} path {path_index}, "
                         f"importance={importance:.3f}, reward={reward:.2f}")
 
-        # Update environment based on action
+        # Apply the action to the environment
         if action_type == 'ANALYZE':
             self._handle_analyze(path_index, path_risk)
         else:  # SKIP
@@ -443,10 +434,10 @@ class BadRandomnessEnv(gym.Env):
         self.episode_info.total_reward += reward
         self.state_builder.update_step(action_type)
 
-        # Check if episode is done
+        # Check termination
         done = self._is_done()
 
-        # Build next state using structured format
+        # Build the next state
         next_state = self.state_builder.build_state(
             self.current_contract,
             self.pool_state,
@@ -454,7 +445,6 @@ class BadRandomnessEnv(gym.Env):
             max_steps=self.max_steps
         )
 
-        # Create info dictionary
         info = {
             'episode': self.current_episode,
             'step': self.episode_info.steps,
@@ -466,10 +456,10 @@ class BadRandomnessEnv(gym.Env):
             'budget_remaining': self.budget,
             'paths_analyzed': self.episode_info.paths_analyzed,
             'paths_skipped': self.episode_info.paths_skipped,
-            'valid_paths': len(self.pool_state.current_pool),  # for agent
+            'valid_paths': len(self.pool_state.current_pool),
         }
 
-        # Track action history
+        # Track action and reward history
         self.action_history.append((action_type, path_index))
         self.reward_history.append(reward)
 
@@ -477,12 +467,13 @@ class BadRandomnessEnv(gym.Env):
 
     def _calculate_calibrated_pattern_score(self, path: Dict) -> float:
         """
-        Calculate pattern score with calibrated weights
+        Compute a pattern score using calibrated logistic-regression weights.
+        Falls back to a simple heuristic score if the weights are unavailable.
         """
         import pickle
         import numpy as np
 
-        # Load calibrated weights
+        # Load calibrated weights on first use
         if not hasattr(self, 'calibrated_weights'):
             try:
                 with open('calibrated_weights.pkl', 'rb') as f:
@@ -490,14 +481,13 @@ class BadRandomnessEnv(gym.Env):
                     self.calibrated_weights = data['weights']
                     self.calibrated_intercept = data['intercept']
             except:
-                # Fallback to simple scoring
                 return self._calculate_pattern_score(path)
 
-        # Extract features (same 25 features)
+        # Extract the 25-dimensional feature vector
         features = []
         agg = path.get('aggregate_features', {})
 
-        # 17 numerical
+        # 17 numerical features
         for key in ['path_length_normalized', 'require_density', 'condition_density',
                     'keccak_density', 'mitigation_score', 'has_any_mitigation',
                     'has_strong_mitigation', 'has_modifier_protection',
@@ -507,15 +497,15 @@ class BadRandomnessEnv(gym.Env):
                     'has_data_flow', 'contains_loop']:
             features.append(agg.get(key, 0))
 
-        # 4 source + 4 sink
-        features.extend(agg.get('source_type_encoded', [0,0,0,0]))
-        features.extend(agg.get('sink_type_encoded', [0,0,0,0]))
+        # 4 source + 4 sink one-hot features
+        features.extend(agg.get('source_type_encoded', [0, 0, 0, 0]))
+        features.extend(agg.get('sink_type_encoded', [0, 0, 0, 0]))
 
         features = np.array(features)
 
-        # Calculate score
+        # Compute the score
         if len(self.calibrated_weights.shape) > 1:
-            # Multi-class: use probability for HIGH class
+            # Multi-class: use the HIGH-risk class probability
             score = np.dot(features, self.calibrated_weights[2]) + self.calibrated_intercept[2]
         else:
             score = np.dot(features, self.calibrated_weights) + self.calibrated_intercept
@@ -524,7 +514,7 @@ class BadRandomnessEnv(gym.Env):
 
     def _calculate_pattern_score(self, path: Dict) -> float:
         """
-        Calculate pattern score with adjusted weights
+        Compute a heuristic pattern score from source, sink, and protection signals.
         """
         features = path.get('aggregate_features', {})
 
@@ -533,20 +523,20 @@ class BadRandomnessEnv(gym.Env):
 
         # Source scoring
         source_encoded = features.get('source_type_encoded', [0, 0, 0, 0])
-        vuln_score += sum(source_encoded) * 2.0  # simple: each source = 2 points
+        vuln_score += sum(source_encoded) * 2.0  # each active source contributes 2 points
 
         # Sink scoring
         sink_encoded = features.get('sink_type_encoded', [0, 0, 0, 0])
-        if sink_encoded[0] == 1:  # transfer
+        if sink_encoded[0] == 1:      # transfer
             vuln_score += 3.0
-        elif sink_encoded[1] == 1:  # randomGeneration
+        elif sink_encoded[1] == 1:    # randomGeneration
             vuln_score += 2.5
         else:
             vuln_score += 1.0
 
-        # Protection - lower weight
+        # Protection signals
         if features.get('has_modifier_protection', 0) == 1:
-            safe_score += 0.5  # reduced from 3.0 to 0.5
+            safe_score += 0.5
         if features.get('require_density', 0) > 0.5:
             safe_score += 0.5
 
@@ -554,43 +544,44 @@ class BadRandomnessEnv(gym.Env):
 
         return net_score
 
-    
-
     def _calculate_reward(self, action_type: str, path: Dict, path_risk: str, importance: float) -> float:
         """
-        Simplified hierarchical reward function
+        Hierarchical reward function combining safety constraints, an
+        importance-driven core reward, medium-risk handling, contract context,
+        and a pattern-discovery bonus.
         """
 
-        # Level 1: Critical Safety Rules (Absolute)
+        # Level 1: Mandatory safety constraints
         if path_risk == 'HIGH' and action_type == 'SKIP':
-            return -10.0  # Never skip HIGH risk
+            return -10.0  # never skip HIGH-risk paths
         if path_risk == 'LOW' and action_type == 'ANALYZE':
-            return -3.0  # Avoid analyzing obvious LOW risk
+            return -3.0   # avoid analyzing obviously LOW-risk paths
 
-        # Level 2: Importance-Based Core Reward
-        median_importance = 0.27  # from your actual data
+        # Level 2: Importance-driven core reward
+        # Reference median importance precomputed over the training dataset.
+        median_importance = 0.27
         if action_type == 'ANALYZE':
-            # Positive reward if importance > median, negative if below
+            # Positive when importance exceeds the reference median
             reward = (importance - median_importance) * 25
         else:  # SKIP
-            # Positive reward if importance < median, negative if above
+            # Positive when importance is below the reference median
             reward = (median_importance - importance) * 25
 
-        # Level 3: MEDIUM Risk Handling (importance-dependent)
+        # Level 3: Medium-risk handling
         if path_risk == 'MEDIUM':
             if importance > 0.3 and action_type == 'SKIP':
-                reward -= 2.0  # Mild penalty for skipping important MEDIUM
+                reward -= 2.0  # penalize skipping an important medium-risk path
             elif importance < 0.24 and action_type == 'ANALYZE':
-                reward -= 1.0  # Mild penalty for analyzing unimportant MEDIUM
+                reward -= 1.0  # penalize analyzing an unimportant medium-risk path
 
-        # Level 4: Contract Context (subtle influence)
+        # Level 4: Contract-level context
         if hasattr(self.episode_info, 'contract_label'):
             if self.episode_info.contract_label == 'SAFE':
                 reward += 1.5 if action_type == 'SKIP' else -0.5
             elif self.episode_info.contract_label == 'VULNERABLE':
                 reward += 0.5 if action_type == 'ANALYZE' else -0.5
 
-        # Level 5: Pattern Discovery Bonus (optional, keep if useful)
+        # Level 5: Pattern-discovery bonus
         pattern_info = path.get('pattern_info', {})
         if action_type == 'ANALYZE' and pattern_info.get('is_new', False):
             reward += 2.0
@@ -598,15 +589,15 @@ class BadRandomnessEnv(gym.Env):
         return np.clip(reward, -12.0, 12.0)
 
     def _handle_analyze(self, path_index: int, path_risk: str):
-        """Handle ANALYZE action with automatic refill"""
+        """Apply an ANALYZE action and refill the pool."""
         self.episode_info.paths_analyzed += 1
 
-        # Remove from pool
+        # Remove the analyzed path from the pool
         if path_index < len(self.pool_state.current_pool):
             del self.pool_state.current_pool[path_index]
             logger.debug(f"Path {path_index} analyzed (risk={path_risk})")
 
-        # Always keep pool filled
+        # Keep the pool filled
         min_pool_size = max(10, len(self.pool_state.current_pool))
         while len(self.pool_state.current_pool) < min_pool_size and len(self.pool_state.available_paths) > 0:
             new_path = self.pool_state.available_paths.pop(0)
@@ -617,15 +608,15 @@ class BadRandomnessEnv(gym.Env):
                 f"Pool size: {len(self.pool_state.current_pool)}, Available: {len(self.pool_state.available_paths)}")
 
     def _handle_skip(self, path_index: int, path_risk: str):
-        """Handle SKIP action with path removal"""
+        """Apply a SKIP action and refill the pool."""
         self.episode_info.paths_skipped += 1
 
-        # Remove skipped path
+        # Remove the skipped path from the pool
         if path_index < len(self.pool_state.current_pool):
             del self.pool_state.current_pool[path_index]
             logger.debug(f"Path {path_index} skipped and removed (risk={path_risk})")
 
-        # Always keep pool filled
+        # Keep the pool filled
         min_pool_size = max(10, len(self.pool_state.current_pool))
         while len(self.pool_state.current_pool) < min_pool_size and len(self.pool_state.available_paths) > 0:
             new_path = self.pool_state.available_paths.pop(0)
@@ -636,7 +627,7 @@ class BadRandomnessEnv(gym.Env):
                 f"Pool size: {len(self.pool_state.current_pool)}, Available: {len(self.pool_state.available_paths)}")
 
     def _handle_invalid_action(self) -> Tuple[np.ndarray, float, bool, Dict]:
-        """Handle invalid action"""
+        """Apply a penalty for an invalid action."""
         reward = -self.reward_config['invalid_action_penalty']
         self.episode_info.steps += 1
         self.episode_info.total_reward += reward
@@ -652,7 +643,6 @@ class BadRandomnessEnv(gym.Env):
             'error': 'Invalid action',
             'episode': self.current_episode,
             'step': self.episode_info.steps,
-            # 'action_mask': self._get_valid_action_mask(),
         }
 
         done = self._is_done()
@@ -662,25 +652,24 @@ class BadRandomnessEnv(gym.Env):
         return state, reward, done, info
 
     def _get_valid_action_mask(self) -> np.ndarray:
-        """
-        Build mask for valid actions in 10-action space
-        """
+        """Build a boolean mask of valid actions for the current pool."""
         mask = np.zeros(self.action_space.n, dtype=bool)
         pool_size = len(self.pool_state.current_pool) if self.pool_state else 0
 
         if pool_size > 0:
-            # Valid ANALYZE actions (0 to min(4, pool_size-1))
+            # Valid ANALYZE actions
             for i in range(min(5, pool_size)):
                 mask[i] = True
 
-            # Valid SKIP actions (5 to 5+min(4, pool_size-1))
+            # Valid SKIP actions
             for i in range(min(5, pool_size)):
                 mask[5 + i] = True
 
         return mask
+
     def _is_done(self) -> bool:
-        """Check if episode should end"""
-        # Max steps reached
+        """Determine whether the episode should terminate."""
+        # Maximum steps reached
         if self.episode_info.steps >= self.max_steps:
             logger.info(f"Episode done: max steps ({self.max_steps}) reached")
             return True
@@ -690,12 +679,12 @@ class BadRandomnessEnv(gym.Env):
             logger.info(f"Episode done: budget exhausted")
             return True
 
-        # Pool empty and no refill possible
+        # No paths left and no refill possible
         if len(self.pool_state.current_pool) == 0 and len(self.pool_state.available_paths) == 0:
             logger.info(f"Episode done: no paths available")
             return True
 
-        # High confidence threshold (optional)
+        # High-confidence vulnerable threshold
         if self.episode_info.true_positives >= 3:
             logger.info(f"Episode done: high confidence vulnerable")
             return True
@@ -703,14 +692,14 @@ class BadRandomnessEnv(gym.Env):
         return False
 
     def get_episode_summary(self) -> Dict:
-        """Get summary of current episode"""
+        """Return a summary of the current episode."""
         if not self.episode_info:
             return {}
 
         precision = (self.episode_info.true_positives /
-                    max(self.episode_info.true_positives + self.episode_info.false_positives, 1))
+                     max(self.episode_info.true_positives + self.episode_info.false_positives, 1))
         recall = (self.episode_info.true_positives /
-                 max(self.episode_info.true_positives + self.episode_info.false_negatives, 1))
+                  max(self.episode_info.true_positives + self.episode_info.false_negatives, 1))
 
         return {
             'episode': self.current_episode,
@@ -730,14 +719,14 @@ class BadRandomnessEnv(gym.Env):
         }
 
     def render(self, mode='human'):
-        """Render environment state"""
+        """Render the current environment state."""
         if mode == 'human':
             summary = self.get_episode_summary()
-            print("\n" + "="*50)
+            print("\n" + "=" * 50)
             print(f"Episode {summary.get('episode', 0)}")
             print(f"Contract: {summary.get('contract', 'N/A')} ({summary.get('label', 'N/A')})")
             print(f"Steps: {summary.get('steps', 0)}/{self.max_steps}")
             print(f"Reward: {summary.get('total_reward', 0):.2f}")
             print(f"Analyzed: {summary.get('paths_analyzed', 0)}, Skipped: {summary.get('paths_skipped', 0)}")
             print(f"Pool size: {len(self.pool_state.current_pool) if self.pool_state else 0}")
-            print("="*50)
+            print("=" * 50)
