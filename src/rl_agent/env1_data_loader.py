@@ -1,4 +1,4 @@
-# data_loader.py
+# env1_data_loader.py
 """
 Contract Data Loader Module for RL Environment
 Handles loading and managing smart contract path databases
@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class ContractData:
-    """Data structure for holding contract information"""
+    """One contract: its paths, profile and label."""
     address: str
     label: str  # safe/vulnerable
     paths: List[Dict]
@@ -39,26 +39,19 @@ class ContractData:
 
 class ContractDataLoader:
     """
-    Responsible for reading and managing contract data
-    This class is part of the RL environment and provides required data
+    Reads the path databases and contract profiles produced by the
+    taint analysis (Phase 1) and serves them to the RL environment.
     """
 
     def __init__(self,
-                 # path_db_dir: str = r"C:\Users\Hadis\Documents\NewModel1\path_databases_updated",
-                 # profile_dir: str = r"C:\Users\Hadis\Documents\NewModel1\contract_profiles",
-
-                 path_db_dir: str = r"C:\Users\Hadis\Documents\NewModel1\path_databases_updated",
-                 profile_dir: str = r"C:\Users\Hadis\Documents\NewModel1\contract_profiles",
+                 path_db_dir: str = "data/path_databases",
+                 profile_dir: str = "data/contract_profiles",
                  min_paths_required: int = 1):
-
-
-
-
         """
         Args:
-            path_db_dir: path to path databases folder (with modifier info)
-            profile_dir: path to contract profiles folder
-            min_paths_required: minimum required paths for a valid contract
+            path_db_dir: folder with the *_path_database.json files (with modifier info)
+            profile_dir: folder with the *_profile.json files
+            min_paths_required: minimum number of paths for a contract to be used
         """
         self.path_db_dir = Path(path_db_dir)
         self.profile_dir = Path(profile_dir)
@@ -77,7 +70,7 @@ class ContractDataLoader:
         logger.info(f"DataLoader initialized with {len(self.valid_contracts)} valid contracts")
 
     def _validate_directories(self):
-        """Check existence of directories"""
+        """Fail early if a data folder is missing or empty."""
         if not self.path_db_dir.exists():
             raise FileNotFoundError(f"Path database directory not found: {self.path_db_dir}")
         if not self.profile_dir.exists():
@@ -94,7 +87,7 @@ class ContractDataLoader:
         logger.debug(f"Found {len(path_files)} path files and {len(profile_files)} profile files")
 
     def _initialize_valid_contracts(self):
-        """Identify and store valid contracts"""
+        """Collect contracts that have both files, enough paths and a label."""
         all_addresses = self._get_all_contract_addresses()
 
         for addr in all_addresses:
@@ -125,7 +118,7 @@ class ContractDataLoader:
         logger.info(f"Found {len(self.valid_contracts)} valid contracts")
 
     def _get_all_contract_addresses(self) -> List[str]:
-        """List of all available contract addresses"""
+        """Addresses that have both a path database and a profile."""
         path_files = set(f.stem.replace("_path_database", "")
                          for f in self.path_db_dir.glob("*_path_database.json"))
         profile_files = set(f.stem.replace("_profile", "")
@@ -135,13 +128,13 @@ class ContractDataLoader:
 
     def load_contract(self, contract_address: str) -> Optional[ContractData]:
         """
-        Load complete data for a contract
+        Load one contract (cached).
 
         Args:
-            contract_address: contract address (with or without 0x)
+            contract_address: address, with or without 0x
 
         Returns:
-            ContractData object or None on error
+            ContractData, or None if a file is missing or malformed
         """
         # Normalize address
         if not contract_address.startswith("0x"):
@@ -196,7 +189,7 @@ class ContractDataLoader:
             return None
 
     def _validate_data_structure(self, path_data: Dict, profile_data: Dict) -> bool:
-        """Validate data structure"""
+        """Minimal sanity check of the two JSON files."""
         # Check path data
         if 'paths' not in path_data or not isinstance(path_data['paths'], list):
             logger.error("Invalid path data structure")
@@ -227,19 +220,16 @@ class ContractDataLoader:
 
     def get_valid_contracts(self, min_paths: int = 5) -> List[Tuple[str, int, str]]:
         """
-        List of valid contracts with minimum number of paths
-
-        Args:
-            min_paths: minimum required number of paths
+        Contracts with at least min_paths paths and a known label.
+        (The paper uses min_paths=5.)
 
         Returns:
             List of tuples: (contract_address, path_count, label)
         """
-        # If contracts not loaded, load first
+        # load everything once
         if not hasattr(self, 'contracts'):
             self.contracts = {}
 
-            # Read all path database files
             for file in os.listdir(self.path_db_dir):
                 if file.endswith('_path_database.json'):
                     address = file.replace('_path_database.json', '')
@@ -262,25 +252,21 @@ class ContractDataLoader:
                         logger.warning(f"No profile for {address}")
                         profile_data = {}
 
-                    # Save contract data
                     self.contracts[address] = {
                         'paths': path_data.get('paths', []),
                         'profile': profile_data
                     }
 
-        # Now filter them
         valid_contracts = []
 
         for address, data in self.contracts.items():
             path_count = len(data['paths'])
             label = data['profile'].get('label', 'unknown')
 
-            # Filter contracts with few paths
             if path_count < min_paths:
                 logger.debug(f"Skipping contract {address[:10]}... with only {path_count} paths")
                 continue
 
-            # Filter contracts without label
             if label == 'unknown':
                 logger.debug(f"Skipping contract {address[:10]}... with unknown label")
                 continue
@@ -289,7 +275,7 @@ class ContractDataLoader:
 
         logger.info(f"Found {len(valid_contracts)} valid contracts with >= {min_paths} paths")
 
-        # Display distribution
+        # class distribution
         safe_count = sum(1 for _, _, label in valid_contracts if label == 'safe')
         vuln_count = sum(1 for _, _, label in valid_contracts if label == 'vulnerable')
         logger.info(f"Distribution: {safe_count} safe, {vuln_count} vulnerable")
@@ -298,11 +284,11 @@ class ContractDataLoader:
 
 
     def get_contracts_by_label(self, label: str) -> List[str]:
-        """Return contracts with specific label"""
+        """Addresses with the given label."""
         return [addr for addr, _, lbl in self.valid_contracts if lbl == label]
 
     def get_random_contract(self, label: Optional[str] = None) -> Optional[ContractData]:
-        """Randomly select a contract"""
+        """Random contract, optionally of one label."""
         import random
 
         if label:
@@ -317,7 +303,7 @@ class ContractDataLoader:
         return self.load_contract(selected)
 
     def get_statistics(self) -> Dict:
-        """General dataset statistics"""
+        """Dataset summary."""
         total_paths = sum(count for _, count, _ in self.valid_contracts)
         safe_count = sum(1 for _, _, label in self.valid_contracts if label == 'safe')
         vuln_count = len(self.valid_contracts) - safe_count
@@ -334,8 +320,8 @@ class ContractDataLoader:
 
     def extract_path_features(self, path: Dict) -> np.ndarray:
         """
-        Extract feature vector from a path
-        Returns: numpy array of features
+        Short feature vector of a path (helper; the agent itself uses the
+        100-dimensional vector built in env3_state_builder.py).
         """
         features = path.get('aggregate_features', {})
 
@@ -369,6 +355,6 @@ class ContractDataLoader:
         return np.array(feature_vector, dtype=np.float32)
 
     def clear_cache(self):
-        """Clear cache to free memory"""
+        """Free the contract cache."""
         self.loaded_contracts.clear()
         logger.info("Cache cleared")
