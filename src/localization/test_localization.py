@@ -1,3 +1,4 @@
+
 import argparse
 import os
 import pickle
@@ -26,7 +27,7 @@ from localizer import VulnerabilityLocalizer, compute_metrics
 # pre-processed databases somewhere else.
 # ---------------------------------------------------------------------------
 _DEFAULT_BASE = Path(__file__).resolve().parents[2] / "data"
-DEFAULT_MODEL_PATH = _DEFAULT_BASE / "trained_dqn_model_2500.pth"
+DEFAULT_MODEL_PATH = Path(__file__).resolve().parents[2] / "models" / "trained_dqn_model_2500.pth"
 DEFAULT_GT_PATH = _HERE / "data" / "ground_truth" / "final_dataset_14_contracts.pkl"
 DEFAULT_PATH_DB_DIR = _DEFAULT_BASE / "path_databases_node_level"
 DEFAULT_AST_DIR = _DEFAULT_BASE / "contract_ast1_clean"
