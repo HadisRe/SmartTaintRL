@@ -1,4 +1,3 @@
-
 import argparse
 import os
 import pickle
@@ -21,7 +20,7 @@ from localizer import VulnerabilityLocalizer, compute_metrics
 _DEFAULT_BASE = Path(__file__).resolve().parents[2] / "data"
 DEFAULT_MODEL_PATH = _DEFAULT_BASE / "trained_dqn_model_2500.pth"
 DEFAULT_GT_PATH = _HERE / "data" / "ground_truth" / "final_dataset_14_contracts.pkl"
-DEFAULT_PATH_DB_DIR = _DEFAULT_BASE / "path_databases_updated"
+DEFAULT_PATH_DB_DIR = _DEFAULT_BASE / "path_databases_node_level"
 DEFAULT_AST_DIR = _DEFAULT_BASE / "contract_ast1_clean"
 
 
@@ -55,6 +54,9 @@ def evaluate_configuration(localizer: VulnerabilityLocalizer,
     exact_matches = 0
     caller_matches = 0
     wrong = 0
+    # function-level measures reported in the paper (Section 6.2):
+    # the vulnerable function, or a direct caller of it, at rank 1 / within the top two
+    rank_hits = {'top1_exact': 0, 'top1_or_caller': 0, 'top2_exact': 0, 'top2_or_caller': 0}
     node_precisions: List[float] = []
     node_recalls: List[float] = []
 
@@ -89,6 +91,13 @@ def evaluate_configuration(localizer: VulnerabilityLocalizer,
 
         func_names = [f for f, _ in ranked_funcs]
         predicted = func_names[0]
+
+        def _hit(f):
+            return f == gt_function or localizer.check_caller_relationship(call_graph, f, gt_function)
+        rank_hits['top1_exact'] += int(gt_function in func_names[:1])
+        rank_hits['top2_exact'] += int(gt_function in func_names[:2])
+        rank_hits['top1_or_caller'] += int(any(_hit(f) for f in func_names[:1]))
+        rank_hits['top2_or_caller'] += int(any(_hit(f) for f in func_names[:2]))
         pred_nodes = _extract_pred_nodes(loc_result.get('nodes', {}).get(predicted, []))
 
         if predicted == gt_function:
@@ -124,6 +133,7 @@ def evaluate_configuration(localizer: VulnerabilityLocalizer,
         'strict_acc': exact_matches / total if total else 0.0,
         'relaxed_acc': (exact_matches + caller_matches) / total if total else 0.0,
     }
+    summary.update({k: v / total if total else 0.0 for k, v in rank_hits.items()})
     if node_precisions:
         avg_p = sum(node_precisions) / len(node_precisions)
         avg_r = sum(node_recalls) / len(node_recalls)
@@ -139,7 +149,12 @@ def evaluate_configuration(localizer: VulnerabilityLocalizer,
 
 
 def print_summary(name: str, summary: Dict) -> None:
+    # rank1 / top2: vulnerable function or a direct caller at rank 1 / within the top two
+    # (the measures of the paper); strict/relaxed are kept from the first version, where
+    # "relaxed" counted a caller anywhere in the top five.
     print(f"  {name:<28}"
+          f"rank1={summary['top1_or_caller']*100:5.1f}%   "
+          f"top2={summary['top2_or_caller']*100:5.1f}%   "
           f"strict={summary['strict_acc']*100:5.1f}%   "
           f"relaxed={summary['relaxed_acc']*100:5.1f}%   "
           f"P@5={summary['node_p5']:.2f}  "
@@ -163,6 +178,8 @@ def print_detailed(per_contract: List[Dict]) -> None:
 # Ablation configurations
 # ---------------------------------------------------------------------------
 
+# alpha, beta, gamma, delta are the weights omega_g, omega_a, omega_p, omega_c of Eq. 12
+# (gradient, attention, propagation, centrality); all set to 1 in the paper (Table 13).
 ABLATION_CONFIGS: List[Tuple[str, Dict[str, float]]] = [
     ('Full (alpha=beta=gamma=delta=1)', dict(alpha=1, beta=1, gamma=1, delta=1)),
     ('Gradient only',                   dict(alpha=1, beta=0, gamma=0, delta=0)),
@@ -188,7 +205,7 @@ def main():
     parser.add_argument('--ground-truth', type=Path, default=DEFAULT_GT_PATH,
                         help="Path to final_dataset_14_contracts.pkl.")
     parser.add_argument('--path-db-dir', type=Path, default=DEFAULT_PATH_DB_DIR,
-                        help="Directory of *_path_database.json files.")
+                        help="Directory of *_enriched_paths.json files (node-level path databases).")
     parser.add_argument('--ast-dir', type=Path, default=DEFAULT_AST_DIR,
                         help="Directory of *_semantic_graph.json files.")
     parser.add_argument('--ablation', action='store_true',
