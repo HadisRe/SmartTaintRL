@@ -12,10 +12,9 @@ SmartTaintRL is a framework that combines taint analysis with deep reinforcement
 
 ### Key Features
 
-- **High Accuracy**: Achieves F1-score of 0.955 on balanced datasets and 0.950 on imbalanced ones
-- **Efficient Path Pruning**: Reduces search space by 44.3% while maintaining 96% recall
-- **Precise Localization**: 78.6% function-level accuracy in identifying vulnerable code
-- **Robust to Class Imbalance**: Less than 1% F1 degradation under real-world conditions (95:5 ratio)
+ - **Contract-level detection**: F1-score of 0.918 (balanced) and 0.701 (imbalanced), higher than Slither, RNVulDet, Mythril and TaintSentinel under the same evaluation protocol
+- **Path pruning**: skips about 40% of the taint paths with a path-level recall of 0.938 (balanced) and 0.964 (imbalanced)
+- **Localization**: ranks the vulnerable function or a caller first in 71.4% of the 14 ground-truth contracts (85.7% among the top two)
 
 ## Architecture
 
