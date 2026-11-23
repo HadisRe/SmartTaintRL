@@ -31,10 +31,10 @@ class PoolState:
 
 class PoolManager:
     """
-    Keeps the pool of paths during an episode: draws the initial pool,
-    removes decided paths and refills the pool when it gets small.
-    The priority score is used only to choose refill paths; it is not
-    part of the agent's input.
+    Draws the initial pool of an episode. The environment (env4) only calls
+    initialize_pool(); it removes decided paths and refills the pool itself,
+    in the order of the path database. The priority-based helpers below
+    (refill_pool, _select_mixed, handle_path_analyzed) are not used in training.
     """
 
     def __init__(self,
@@ -90,8 +90,8 @@ class PoolManager:
     def calculate_priority_score(self, path: Dict) -> float:
         """
         Fixed priority of a path from its source, sink and missing protection.
-        Used for refills only; the agent never sees this value.
-        This is also the score of the Top-k baseline in the paper (Table 10).
+        The agent never sees this value. It is the score of the Top-k
+        baseline in the paper (Table 10).
 
         Returns:
             priority score (higher = more urgent)
@@ -235,7 +235,8 @@ class PoolManager:
                              pool_state: PoolState,
                              path_index: int) -> bool:
         """
-        Remove a decided path from the pool and refill if needed.
+        Remove a decided path from the pool and refill if needed
+        (not used by env4, which handles this itself).
 
         Args:
             pool_state: current pool
