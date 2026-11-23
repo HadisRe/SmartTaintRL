@@ -12,6 +12,14 @@ if str(_HERE) not in sys.path:
 
 from localizer import VulnerabilityLocalizer, compute_metrics
 
+# Reproducibility note: in the single-channel "Propagation only" and "Centrality only"
+# runs several nodes can get the same score, and Python's set order decides the ranking
+# among them. That order depends on PYTHONHASHSEED, so these two rows change slightly
+# between runs (F1@5 0.66-0.68 and 0.52-0.62). The full model, the other single-channel
+# rows and all leave-one-out rows are not affected.
+#   PYTHONHASHSEED=14 python test_localization.py --ablation ...
+# reproduces Table 13 of the paper exactly.
+
 
 # ---------------------------------------------------------------------------
 # Default file locations. Override on the command line if you keep the
