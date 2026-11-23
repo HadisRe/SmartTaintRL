@@ -13,10 +13,10 @@ import numpy as np
 from matplotlib.gridspec import GridSpec
 from typing import Dict, List
 # Import our environment components
-from evn4 import BadRandomnessEnv
-from env1 import ContractDataLoader
-from env2 import PoolManager
-from env3 import StateBuilder
+from env4_environment import BadRandomnessEnv
+from env1_data_loader import ContractDataLoader
+from env2_pool_manager import PoolManager
+from env3_state_builder import StateBuilder
 import os
 import matplotlib.pyplot as plt
 import seaborn as sns
@@ -30,7 +30,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 def analyze_q_values(agent, env, num_episodes=50):
-    """تحلیل Q-values برای paths مختلف"""
+    """Q(ANALYZE) - Q(SKIP) split by timestamp source and require density (Fig. 8)."""
     q_values_analysis = {
         'with_timestamp': [],
         'without_timestamp': [],
@@ -45,16 +45,13 @@ def analyze_q_values(agent, env, num_episodes=50):
             state_tensor = torch.FloatTensor(state).unsqueeze(0)
             q_values = agent.q_network(state_tensor).squeeze(0)  # (20, 2)
 
-            # برای هر path در pool
             for i in range(min(10, len(env.pool_state.current_pool))):
                 path = env.pool_state.current_pool[i]
                 features = path.get('aggregate_features', {})
 
-                # Q-values برای این path
                 q_analyze = q_values[i, 0].item()
                 q_skip = q_values[i, 1].item()
 
-                # بررسی ویژگی‌ها
                 source_type = path.get('basic_info', {}).get('source_type', '')
                 require_density = features.get('require_density', 0)
 
@@ -68,10 +65,9 @@ def analyze_q_values(agent, env, num_episodes=50):
                 else:
                     q_values_analysis['without_require'].append(q_analyze - q_skip)
 
-    # رسم نمودار
     fig, axes = plt.subplots(1, 2, figsize=(12, 5))
 
-    # نمودار timestamp
+    # timestamp
     axes[0].hist(q_values_analysis['with_timestamp'], alpha=0.5, label='With Timestamp', bins=20, color='red')
     axes[0].hist(q_values_analysis['without_timestamp'], alpha=0.5, label='Without Timestamp', bins=20, color='blue')
     axes[0].set_xlabel('Q(ANALYZE) - Q(SKIP)')
@@ -80,7 +76,7 @@ def analyze_q_values(agent, env, num_episodes=50):
     axes[0].legend()
     axes[0].axvline(x=0, color='black', linestyle='--', alpha=0.3)
 
-    # نمودار require
+    # require density
     axes[1].hist(q_values_analysis['with_require'], alpha=0.5, label='High Require', bins=20, color='green')
     axes[1].hist(q_values_analysis['without_require'], alpha=0.5, label='Low Require', bins=20, color='orange')
     axes[1].set_xlabel('Q(ANALYZE) - Q(SKIP)')
@@ -97,13 +93,11 @@ def analyze_q_values(agent, env, num_episodes=50):
 
 
 def track_action_evolution(training_history):
-    """تحلیل تغییر رفتار agent در طول آموزش"""
+    """Share of analyze decisions per block of 10 episodes."""
 
-    # فرض: training_history شامل action_counts برای هر 10 episode است
     episodes_bins = []
     analyze_ratios = []
 
-    # از داده‌هایی که در training loop ذخیره کردید
     for i in range(0, len(training_history), 10):
         batch = training_history[i:i + 10]
         total_analyze = sum(ep.get('analyze_count', 0) for ep in batch)
@@ -114,7 +108,6 @@ def track_action_evolution(training_history):
             analyze_ratios.append(ratio)
             episodes_bins.append(i + 5)
 
-    # رسم نمودار
     plt.figure(figsize=(10, 6))
     plt.plot(episodes_bins, analyze_ratios, marker='o', linewidth=2)
     plt.xlabel('Episode')
@@ -129,29 +122,26 @@ def track_action_evolution(training_history):
 
 
 def analyze_performance_breakdown(metrics_collector):
-    """تحلیل دقیق performance"""
+    """Compare the agent with an all-safe baseline."""
 
-    # داده‌ها از metrics_collector
     tp = metrics_collector.true_positives
     fp = metrics_collector.false_positives
     tn = metrics_collector.true_negatives
     fn = metrics_collector.false_negatives
 
-    # محاسبات
     total = tp + fp + tn + fn
     actual_vulnerable = tp + fn
     actual_safe = tn + fp
 
-    # Baseline: همه را safe فرض کن
+    # baseline: everything predicted safe
     baseline_accuracy = actual_safe / total
     baseline_recall = 0
 
-    # مدل شما
+    # agent
     model_accuracy = (tp + tn) / total
     model_recall = tp / max(actual_vulnerable, 1)
     model_precision = tp / max(tp + fp, 1)
 
-    # نمودار مقایسه
     fig, axes = plt.subplots(1, 2, figsize=(12, 5))
 
     # Performance comparison
@@ -263,12 +253,12 @@ class ReplayBuffer:
 
     def push(self, state: np.ndarray, action: Tuple[int, str], reward: float,
              next_state: np.ndarray, done: bool, info: Dict = None):
-        """Store experience با tuple action"""
-        path_index, action_type = action  # تجزیه tuple
+        """Store one transition; action is (path_index, action_type)."""
+        path_index, action_type = action
         experience = {
             'state': state,
-            'path_index': path_index,  # به جای 'action'
-            'action_type': 0 if action_type == 'ANALYZE' else 1,  # جدید
+            'path_index': path_index,
+            'action_type': 0 if action_type == 'ANALYZE' else 1,  # 0 = analyze, 1 = skip
             'reward': reward,
             'next_state': next_state,
             'done': done,
@@ -280,7 +270,7 @@ class ReplayBuffer:
         batch = random.sample(self.buffer, batch_size)
 
         states = np.array([e['state'] for e in batch])
-        path_indices = np.array([e['path_index'] for e in batch])  # جایگزین actions
+        path_indices = np.array([e['path_index'] for e in batch])
         action_types = np.array([e['action_type'] for e in batch])
         rewards = np.array([e['reward'] for e in batch])
         next_states = np.array([e['next_state'] for e in batch])
@@ -288,8 +278,8 @@ class ReplayBuffer:
 
         return {
             'states': states,
-            'path_indices': path_indices,  # جدید
-            'action_types': action_types,  # جدید
+            'path_indices': path_indices,
+            'action_types': action_types,
             'rewards': rewards,
             'next_states': next_states,
             'dones': dones
@@ -334,7 +324,7 @@ class PrioritizedReplayBuffer(ReplayBuffer):
 
     def push(self, state: np.ndarray, action: Tuple[int, str], reward: float,
              next_state: np.ndarray, done: bool, info: Dict = None):
-        """Store experience با tuple action"""
+        """Store one transition; action is (path_index, action_type)."""
         path_index, action_type = action
         experience = {
             'state': state,
@@ -348,7 +338,7 @@ class PrioritizedReplayBuffer(ReplayBuffer):
         self.buffer.append(experience)
 
     def sample(self, batch_size: int) -> Dict:
-        """Sample batch با format جدید"""
+        """Sample a batch (uniform)."""
         batch = random.sample(self.buffer, batch_size)
 
         states = np.array([e['state'] for e in batch])
@@ -684,14 +674,14 @@ class DQNAgent:
                  epsilon_end: float = 0.05,
                  epsilon_decay: int = 500):
         # Networks
-        self.q_network = DQN(path_features_dim=100)  # حذف state_dim, action_dim
+        self.q_network = DQN(path_features_dim=100)
         self.target_network = DQN(path_features_dim=100)
         self.target_network.load_state_dict(self.q_network.state_dict())
 
-        # Optimistic initialization برای معماری جدید
+        # optimistic initialization of the output layer
         for layer in self.q_network.modules():
             if isinstance(layer, nn.Linear):
-                if layer.out_features == 2:  # آخرین لایه که 2 output دارد
+                if layer.out_features == 2:  # output layer (analyze, skip)
                     layer.bias.data[0] = 1.0  # ANALYZE bias
                     layer.bias.data[1] = 0.0  # SKIP bias
         # Optimizer
@@ -713,28 +703,26 @@ class DQNAgent:
 
     def select_action(self, state: np.ndarray, valid_paths: int = None) -> Tuple[int, str]:
         """
-        انتخاب بهترین path-action pair
+        Epsilon-greedy choice of a (path, action) pair.
 
         Args:
-            state: structured state با shape (20, 100)
-            valid_paths: تعداد paths واقعی در pool (بقیه padding هستند)
+            state: (20, 100) state
+            valid_paths: number of real paths in the pool (the rest is padding)
 
         Returns:
-            tuple: (path_index, action_type) مثلاً (3, 'ANALYZE')
+            (path_index, action_type), e.g. (3, 'ANALYZE')
         """
         # Epsilon-greedy
         eps_threshold = self.epsilon_end + (self.epsilon_start - self.epsilon_end) * \
                         np.exp(-1. * self.steps_done / self.epsilon_decay)
         self.steps_done += 1
 
-        # تعداد paths معتبر
         if valid_paths is None:
-            # پیدا کردن paths که non-zero هستند
+            # rows that are not all zero
             valid_paths = np.sum(np.any(state != 0, axis=1))
 
         # Exploration
         if random.random() < eps_threshold:
-            # انتخاب تصادفی یک path و action
             path_idx = random.randint(0, min(valid_paths - 1, 19))
             action_type = random.choice(['ANALYZE', 'SKIP'])
             return path_idx, action_type
@@ -748,15 +736,10 @@ class DQNAgent:
             q_values_masked = q_values.clone()
             q_values_masked[valid_paths:] = -float('inf')
 
-            # پیدا کردن بهترین path-action pair
-            # q_values[:, 0] = Q values برای ANALYZE
-            # q_values[:, 1] = Q values برای SKIP
-
-            # Flatten کردن برای پیدا کردن max
+            # column 0 = analyze, column 1 = skip; take the best of all 40 values
             q_flat = q_values_masked.view(-1)  # (40,)
             best_idx = q_flat.argmax().item()
 
-            # تبدیل index به path_index و action_type
             path_idx = best_idx // 2
             action_idx = best_idx % 2
             action_type = 'ANALYZE' if action_idx == 0 else 'SKIP'
@@ -765,10 +748,9 @@ class DQNAgent:
 
     def update(self, batch: Dict, batch_size: int = 32):
         """
-        Update Q-network با structured states و tuple actions
+        One Double-DQN update on a batch.
         """
         states = torch.FloatTensor(batch['states'])  # (batch, 20, 100)
-        # actions حالا tuple است: (path_index, action_type)
         path_indices = torch.LongTensor(batch['path_indices'])  # (batch,)
         action_types = torch.LongTensor(batch['action_types'])  # (batch,) - 0=ANALYZE, 1=SKIP
         rewards = torch.FloatTensor(batch['rewards']).unsqueeze(1)  # (batch, 1)
@@ -777,23 +759,21 @@ class DQNAgent:
 
         # Current Q values
         current_q_all = self.q_network(states)  # (batch, 20, 2)
-        # Select Q-value برای path و action انتخاب شده
+        # Q-value of the chosen (path, action)
         batch_indices = torch.arange(batch_size)
         current_q_values = current_q_all[batch_indices, path_indices, action_types].unsqueeze(1)
 
         # Next Q values with Double DQN
         with torch.no_grad():
-            # انتخاب best action با main network
+            # best next action from the online network
             next_q_all = self.q_network(next_states)  # (batch, 20, 2)
-            # Flatten برای پیدا کردن best overall action
             next_q_flat = next_q_all.view(batch_size, -1)  # (batch, 40)
             best_next_actions = next_q_flat.max(1)[1]  # (batch,)
 
-            # تبدیل به path_index و action_type
             best_path_indices = best_next_actions // 2
             best_action_types = best_next_actions % 2
 
-            # Evaluate با target network
+            # its value from the target network
             target_q_all = self.target_network(next_states)  # (batch, 20, 2)
             next_q_values = target_q_all[batch_indices, best_path_indices, best_action_types].unsqueeze(1)
 
@@ -868,16 +848,16 @@ class EnhancedMetricsVisualizer:
         self.f1_history = []
         self.pruning_history = []
 
-        # Accuracy history (جدید)
+        # Accuracy history
         self.accuracy_history = []
 
-        # Confusion matrix values for path-level (جدید)
+        # Path-level confusion matrix
         self.true_positives = 0
         self.false_positives = 0
         self.true_negatives = 0
         self.false_negatives = 0
 
-        # Pattern Bank metrics (جدید)
+        # Pattern registry metrics
         self.pattern_bank_usage = []
         self.pattern_frequencies = {}
     def update_episode(self, episode_data: Dict):
@@ -919,13 +899,13 @@ class EnhancedMetricsVisualizer:
             new_patterns = max(0, new_patterns)
             self.pattern_discovery_rate.append(new_patterns)
 
-        # Pattern Bank usage (جدید برای نمودار Pattern Bank)
+        # Pattern registry usage
         if 'pattern_bank_hit_rate' in episode_data:
             if not hasattr(self, 'pattern_bank_usage'):
                 self.pattern_bank_usage = []
             self.pattern_bank_usage.append(episode_data['pattern_bank_hit_rate'] * 100)
 
-        # Pattern frequencies (جدید برای heatmap)
+        # Pattern frequencies
         if 'pattern_frequencies' in episode_data:
             self.pattern_frequencies = episode_data['pattern_frequencies']
 
@@ -939,13 +919,13 @@ class EnhancedMetricsVisualizer:
         if 'pruning_ratio' in episode_data:
             self.pruning_history.append(episode_data['pruning_ratio'])
 
-        # Accuracy - اصلاح شده
+        # Accuracy
         if 'accuracy' in episode_data:
             if not hasattr(self, 'accuracy_history'):
                 self.accuracy_history = []
             self.accuracy_history.append(episode_data['accuracy'])
 
-        # Confusion matrix values - اصلاح شده
+        # Confusion matrix values
         if 'confusion' in episode_data:
             self.true_positives = episode_data['confusion'].get('tp', 0)
             self.false_positives = episode_data['confusion'].get('fp', 0)
@@ -970,11 +950,11 @@ class EnhancedMetricsVisualizer:
         if self.episode_rewards:
             episodes = range(1, len(self.episode_rewards) + 1)
 
-            # نمایش rewards اصلی با alpha کم
+            # raw rewards, faint
             ax1.plot(episodes, self.episode_rewards, alpha=0.3, color='lightblue', linewidth=0.8,
                      label='Episode Rewards')
 
-            # محاسبه moving average
+            # moving average
             if len(self.episode_rewards) > 10:
                 window = min(10, len(self.episode_rewards) // 5)
                 moving_avg = np.convolve(self.episode_rewards, np.ones(window) / window, mode='valid')
@@ -982,7 +962,7 @@ class EnhancedMetricsVisualizer:
                 ax1.plot(ma_episodes, moving_avg, color='darkred', linewidth=2.5,
                          label=f'MA({window})')
 
-            # نمایش میانگین کل
+            # overall mean
             total_mean = np.mean(self.episode_rewards)
             ax1.axhline(y=total_mean, color='green', linestyle='--',
                         label=f'Mean: {total_mean:.2f}')
@@ -993,7 +973,7 @@ class EnhancedMetricsVisualizer:
             ax1.grid(True, alpha=0.3)
             ax1.legend(loc='best')
 
-            # تنظیم محدوده y
+            # y range
             y_min = np.percentile(self.episode_rewards, 5)
             y_max = np.percentile(self.episode_rewards, 95)
             margin = (y_max - y_min) * 0.1
@@ -1023,7 +1003,7 @@ class EnhancedMetricsVisualizer:
                 ax2.legend()
                 ax2.grid(True, alpha=0.3)
 
-        # 3. Path vs Contract Performance - Bar Chart با Accuracy کامل
+        # 3. Path vs contract performance (bar chart)
         ax3 = fig.add_subplot(gs[0, 2])
         if self.recall_history and self.contract_metrics_history:
             metrics_names = ['Precision', 'Recall', 'F1-Score', 'Accuracy']
@@ -1040,11 +1020,11 @@ class EnhancedMetricsVisualizer:
                 path_accuracy
             ]
 
-            # Contract-level values با محاسبه accuracy
+            # contract-level values
             last_contract = self.contract_metrics_history[-1]
             contract_confusion = last_contract.get('contract_confusion', {})
 
-            # محاسبه contract accuracy از confusion matrix
+            # contract accuracy from the confusion matrix
             contract_tp = contract_confusion.get('tp', 0)
             contract_tn = contract_confusion.get('tn', 0)
             contract_fp = contract_confusion.get('fp', 0)
@@ -1247,8 +1227,7 @@ class EnhancedMetricsVisualizer:
                 ax12.set_title('Recall Stability Over Time')
                 ax12.grid(True, alpha=0.3, axis='y')
 
-        # ==== Row 4: خالی - بدون KPI Dashboard ====
-        # هیچ چیز نمایش داده نمی‌شود
+        # row 4 left empty
 
         plt.suptitle('RL-Based Bad Randomness Detection: Comprehensive Training Analysis',
                      fontsize=16, fontweight='bold', y=0.995)
@@ -1308,7 +1287,7 @@ class EnhancedMetricsVisualizer:
         return '\n'.join(lines)
 
 def get_pattern_bank_stats(env):
-    """استخراج آمار pattern bank"""
+    """Pattern registry statistics."""
     stats = {
         'unique_patterns': len(env.discovered_patterns),
         'total_patterns_seen': sum(env.pattern_bank.values()),
@@ -1324,10 +1303,10 @@ def test_training_loop():
     print("Testing Training Loop with New Architecture")
     print("=" * 60)
 
-    # Initialize environment with explicit paths
+    # data folders (set these to your copy of the dataset)
     data_loader = ContractDataLoader(
-        path_db_dir=r"C:\Users\Hadis\Documents\NewModel1\path_databases_updated",
-        profile_dir=r"C:\Users\Hadis\Documents\NewModel1\contract_profiles"
+        path_db_dir="data/path_databases",
+        profile_dir="data/contract_profiles"
     )
 
     # Verify dataset
@@ -1365,9 +1344,7 @@ def test_training_loop():
         visualizer = MetricsVisualizer()
         use_enhanced = False
 
-    # Initialize localizer (once at the beginning)
-    from localizer import AttentionBasedLocalizer
-    localizer = AttentionBasedLocalizer()
+    # localization is run separately (src/localization), not during training
     localization_results = []
 
     # Training tracking variables
@@ -1772,14 +1749,16 @@ def test_training_loop():
 
 
 def test_new_architecture():
-    """تست معماری جدید per-path Q-learning"""
+    """Quick check of the per-path architecture."""
     print("\n" + "=" * 60)
     print("Testing New Per-Path Architecture")
     print("=" * 60)
 
     # Test 1: State Builder
     print("\n1. Testing StateBuilder...")
-    from evn3 import StateBuilder
+
+    from env3_state_builder import StateBuilder
+
     state_builder = StateBuilder()
     print(f"   State shape: {state_builder.state_dim}")
     assert state_builder.state_dim == (20, 100), "State dimension should be (20, 100)"
@@ -1839,7 +1818,7 @@ def test_new_architecture():
     print("=" * 60)
     return True
 def test_replay_buffer():
-    """تست عملکرد Replay Buffer با محیط واقعی"""
+    """Old replay buffer test (written for an earlier action format)."""
     print("\n" + "=" * 60)
     print("Testing Replay Buffer")
     print("=" * 60)
@@ -1863,9 +1842,7 @@ def test_replay_buffer():
         episode_reward = 0
 
         while not done and step < 10:
-            # تصحیح: استفاده از 2-action space
-
-            action = random.randint(0, 9)  # بجای (0, 39)
+            action = random.randint(0, 9)
             next_state, reward, done, info = env.step(action)
 
             # Store in buffer
@@ -1900,7 +1877,7 @@ def test_replay_buffer():
     print(f"\nTesting buffer overflow...")
     initial_size = len(buffer)
     for _ in range(50):
-        buffer.push(np.zeros(2085), 0, 0.0, np.zeros(2085), False)  # تصحیح: 2085 بجای 2080
+        buffer.push(np.zeros(2085), 0, 0.0, np.zeros(2085), False)
     print(f"  Initial size: {initial_size}, After 50 pushes: {len(buffer)}")
     print(f"  Capacity maintained: {len(buffer) <= buffer.capacity}")
 
@@ -1909,7 +1886,7 @@ def test_replay_buffer():
 
 
 def test_network_compatibility():
-    """تست سازگاری network با environment"""
+    """Old network compatibility test."""
     print("=" * 60)
     print("Testing DQN Network Compatibility")
     print("=" * 60)
