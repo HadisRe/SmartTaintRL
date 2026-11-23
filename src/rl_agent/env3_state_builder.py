@@ -1,16 +1,15 @@
-# state_builder.py (Complete revised version)
+# env3_state_builder.py
 """
-State Vector Builder for RL Environment
-Convert pool and contract data to state vector for agent
-Enhanced version with 80 features per path
+Builds the agent's state: one 100-dimensional feature vector for each
+of the (up to) 20 paths in the pool, i.e. a 20 x 100 matrix.
 """
 
 import numpy as np
 import logging
 from typing import Dict, List, Optional, Tuple
 from dataclasses import dataclass
-from env2 import PoolState
-from env1 import ContractData, ContractDataLoader
+from env2_pool_manager import PoolState
+from env1_data_loader import ContractData, ContractDataLoader
 
 # Configure logging
 logging.basicConfig(
@@ -22,14 +21,14 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class StateComponents:
-    """Different components of state vector"""
+    """Parts of the old flat state vector (legacy, not used by the agent)."""
     global_features: np.ndarray  # 8 dims
     pool_features: np.ndarray  # 1600 dims (20 paths × 80)
     contract_embedding: np.ndarray  # 64 dims
     pool_metadata: np.ndarray  # 8 dims
 
     def get_full_vector(self) -> np.ndarray:
-        """Combine all components into one vector"""
+        """Concatenate the parts into one vector."""
         return np.concatenate([
             self.global_features,
             self.pool_features.flatten(),
@@ -40,23 +39,19 @@ class StateComponents:
 
 class StateBuilder:
     """
-    Responsible for building state vector from environment state
-    State Vector: 1680 dimensions total
-    - Global: 8
-    - Pool: 1600 (20 paths × 80 features)
-    - Contract: 64
-    - Metadata: 8
+    Builds the state from the current pool.
+    The agent uses build_state(): a (20, 100) matrix, one row per pool slot.
+    The _build_* helpers further down belong to an earlier flat-vector
+    version and are kept only for reference.
     """
 
     def __init__(self):
-        """
-        StateBuilder for structured state representation
-        """
+        """Structured (20, 100) state."""
         self.max_paths = 20
         self.features_per_path = 100
-        self.state_dim = (20, 100)  # Now it's a tuple, not a number
+        self.state_dim = (20, 100)  # (pool slots, features per path)
 
-        # For tracking progress (these are for compatibility)
+        # step counter, kept for compatibility
         self.episode_step = 0
         self.last_action = None
 
@@ -64,12 +59,11 @@ class StateBuilder:
 
     def _detect_critical_patterns(self, path: Dict) -> Dict[str, float]:
         """
-        Detect critical security patterns
-        Returns: Dictionary of pattern scores (0 or 1)
+        Binary flags for common Bad Randomness patterns.
+        Returns: dict of pattern -> 0/1
         """
         patterns = {}
 
-        # Extract required information
         basic_info = path.get('basic_info', {})
         source_type = basic_info.get('source_type', '')
         sink_type = basic_info.get('sink_type', '')
@@ -126,8 +120,8 @@ class StateBuilder:
 
     def _extract_interaction_features(self, path: Dict) -> np.ndarray:
         """
-        Extract interaction features between different elements
-        Returns: 20-dimensional array
+        Products and ratios of basic features (e.g. mitigation x require density).
+        Returns: 20 values
         """
         features = []
 
@@ -185,38 +179,37 @@ class StateBuilder:
 
     def _extract_semantic_features(self, path: Dict) -> np.ndarray:
         """
-        Extract semantic features from code
-        Returns: 15-dimensional array
+        Keyword and node-type features from the code of the path.
+        Returns: 15 values
         """
         features = []
 
         graph_enrichment = path.get('graph_enrichment', {})
         nodes_detail = graph_enrichment.get('nodes_detail', [])
 
-        # Collect all code snippets
         all_code = ' '.join([node.get('code_snippet', '') for node in nodes_detail]).lower()
 
-        # Feature 1-5: Presence of specific keywords (5 features)
+        # 1-5: keywords
         features.append(1.0 if 'keccak256' in all_code else 0.0)
         features.append(1.0 if 'transfer' in all_code else 0.0)
         features.append(1.0 if 'random' in all_code else 0.0)
         features.append(1.0 if 'now' in all_code or 'timestamp' in all_code else 0.0)
         features.append(1.0 if 'block.' in all_code else 0.0)
 
-        # Feature 6-10: Types of operations (5 features)
+        # 6-10: msg fields and checks
         features.append(1.0 if 'msg.sender' in all_code else 0.0)
         features.append(1.0 if 'msg.value' in all_code else 0.0)
         features.append(1.0 if 'require(' in all_code else 0.0)
         features.append(1.0 if 'assert(' in all_code else 0.0)
         features.append(1.0 if 'revert(' in all_code else 0.0)
 
-        # Feature 11-13: Code complexity (3 features)
+        # 11-13: code complexity
         node_types = graph_enrichment.get('node_types_count', {})
         features.append(min(node_types.get('assignment', 0) / 10.0, 1.0))
         features.append(min(node_types.get('condition', 0) / 5.0, 1.0))
         features.append(min(node_types.get('require', 0) / 3.0, 1.0))
 
-        # Feature 14-15: Functions involved (2 features)
+        # 14-15: functions on the path
         functions = graph_enrichment.get('functions_involved', [])
         features.append(min(len(functions) / 5.0, 1.0))
         features.append(1.0 if 'random' in str(functions).lower() else 0.0)
@@ -225,12 +218,12 @@ class StateBuilder:
 
     def _extract_path_features(self, path: Dict) -> np.ndarray:
         """
-        Actual feature extraction from path using all available information
-        Returns: 100-dimensional array
+        The 100-dimensional feature vector of a path (Section 4.1 of the paper).
+        Returns: 100 values
         """
         all_features = []
 
-        # =============== Section 1: Main features (25) ===============
+        # ---- 1. base features (25) ----
         features = path.get('aggregate_features', {})
         basic_info = path.get('basic_info', {})
 
@@ -261,11 +254,11 @@ class StateBuilder:
         all_features.extend(source_encoded)
         all_features.extend(sink_encoded)
 
-        # =============== Section 2: Modifier Context (15) ===============
+        # ---- 2. modifier context (15) ----
         function_context = path.get('function_context', {})
         modifier_names = function_context.get('modifier_names', [])
 
-        # Specific modifiers that are important
+        # modifiers that usually mean an access or reentrancy guard
         important_modifiers = [
             'onlyOwner', 'onlyAdmin', 'onlyMinter',
             'whenNotPaused', 'nonReentrant', 'lock',
@@ -275,7 +268,7 @@ class StateBuilder:
         for mod in important_modifiers:
             all_features.append(1.0 if mod in modifier_names else 0.0)
 
-        # Total number of modifiers
+        # number of modifiers
         all_features.append(min(len(modifier_names) / 3.0, 1.0))
 
         # Visibility encoding (5 features)
@@ -288,12 +281,12 @@ class StateBuilder:
             1.0 if visibility == '' else 0.0  # unknown
         ])
 
-        # =============== Section 3: Sequence Analysis (20) ===============
+        # ---- 3. order of operations along the path (20) ----
         graph_enrichment = path.get('graph_enrichment', {})
         nodes_detail = graph_enrichment.get('nodes_detail', [])
         path_nodes = basic_info.get('path_nodes', [])
 
-        # Position of require nodes relative to sensitive operations
+        # relative positions of require / transfer / keccak nodes
         require_positions = []
         transfer_positions = []
         keccak_positions = []
@@ -307,21 +300,21 @@ class StateBuilder:
             elif node_type == 'keccak' or 'keccak' in node.get('code_snippet', ''):
                 keccak_positions.append(i / max(len(nodes_detail), 1))
 
-        # Features for positions
+        # position features
         all_features.extend([
-            min(require_positions) if require_positions else 1.0,  # where is first require
-            max(require_positions) if require_positions else 0.0,  # where is last require
+            min(require_positions) if require_positions else 1.0,  # first require
+            max(require_positions) if require_positions else 0.0,  # last require
             min(transfer_positions) if transfer_positions else 1.0,  # first transfer
             max(transfer_positions) if transfer_positions else 0.0,  # last transfer
-            # Is require before transfer?
+            # some require before a transfer?
             1.0 if (require_positions and transfer_positions and
                     min(require_positions) < max(transfer_positions)) else 0.0,
-            # Are all transfers after requires?
+            # all transfers after all requires?
             1.0 if (require_positions and transfer_positions and
                     max(require_positions) < min(transfer_positions)) else 0.0,
         ])
 
-        # Analysis of functions involved
+        # function names on the path
         functions = graph_enrichment.get('functions_involved', [])
         all_features.extend([
             1.0 if 'random' in str(functions).lower() else 0.0,
@@ -332,7 +325,7 @@ class StateBuilder:
             1.0 if 'bet' in str(functions).lower() or 'gamble' in str(functions).lower() else 0.0,
         ])
 
-        # Node type distribution in sequence
+        # node type distribution
         node_types = graph_enrichment.get('node_types_count', {})
         total_nodes = sum(node_types.values()) if node_types else 1
         all_features.extend([
@@ -356,7 +349,7 @@ class StateBuilder:
         else:
             all_features.extend([0.0, 0.0])
 
-        # =============== Section 4: Code Pattern Analysis (20) ===============
+        # ---- 4. code patterns (20) ----
         all_code = ' '.join([node.get('code_snippet', '') for node in nodes_detail]).lower()
 
         # Critical operations
@@ -380,7 +373,7 @@ class StateBuilder:
             1.0 if '%' in all_code else 0.0,  # modulo (often in random)
         ])
 
-        # =============== Section 5: Risk Context (20) ===============
+        # ---- 5. risk context (20) ----
         risk_factors = basic_info.get('_risk_content', [])
         mitigation_content = basic_info.get('_mitigation_content', [])
 
@@ -436,8 +429,8 @@ class StateBuilder:
     def build_state(self, contract: ContractData, pool_state: PoolState,
                     budget_used: float = 0.0, max_steps: int = 50) -> np.ndarray:
         """
-        Build structured state for per-path Q-learning
-        Returns: array with shape (20, 100) - 20 paths, each with 100 features
+        State used by the agent.
+        Returns: array of shape (20, 100); row i holds the features of pool slot i
         """
         max_paths = 20
         features_per_path = 100
@@ -447,7 +440,6 @@ class StateBuilder:
 
         # Fill features for each path in pool
         for i, path in enumerate(pool_state.current_pool[:max_paths]):
-            # Extract 100 features for this path
             path_features = self._extract_path_features(path)
 
             # Ensure correct size
@@ -459,8 +451,7 @@ class StateBuilder:
 
             state[i] = path_features
 
-        # Paths that don't exist are filled with 0 (padding)
-        # This tells the network that these slots are empty
+        # empty slots stay all-zero, which the network reads as "no path"
 
         logger.debug(f"Structured state built: shape={state.shape}, "
                      f"active paths={len(pool_state.current_pool)}")
@@ -470,11 +461,11 @@ class StateBuilder:
     def build_state_with_metadata(self, contract: ContractData, pool_state: PoolState,
                                   budget_used: float = 0.0, max_steps: int = 50) -> Tuple[np.ndarray, List[Dict]]:
         """
-        Build structured state along with metadata for localization
+        Same state as build_state(), plus per-path metadata for localization.
 
         Returns:
-            state: array with shape (20, 100) - same as regular state
-            metadata: list of metadata dictionaries for each path
+            state: (20, 100) array, as in build_state()
+            metadata: one dict per pool slot
         """
         max_paths = 20
         features_per_path = 100
@@ -485,7 +476,7 @@ class StateBuilder:
 
         # Fill features and metadata for each path in pool
         for i, path in enumerate(pool_state.current_pool[:max_paths]):
-            # Extract features (same procedure as before)
+            # features, as in build_state()
             path_features = self._extract_path_features(path)
 
             # Ensure correct size
@@ -497,12 +488,11 @@ class StateBuilder:
 
             state[i] = path_features
 
-            # Extract metadata for localization
+            # metadata used by the localizer
             basic_info = path.get('basic_info', {})
             graph_enrichment = path.get('graph_enrichment', {})
             nodes_detail = graph_enrichment.get('nodes_detail', [])
 
-            # Build metadata for this path
             path_metadata = {
                 'path_id': path.get('id', f'path_{i}'),
                 'contract_address': contract.address if hasattr(contract, 'address') else 'unknown',
@@ -513,7 +503,7 @@ class StateBuilder:
                 'nodes': []
             }
 
-            # Extract information for each node in path
+            # per-node information
             for node_idx, node in enumerate(nodes_detail):
                 node_metadata = {
                     'node_index': node_idx,
@@ -530,7 +520,7 @@ class StateBuilder:
 
             metadata_list.append(path_metadata)
 
-        # For paths that don't exist (padding), add empty metadata
+        # empty metadata for empty slots
         while len(metadata_list) < max_paths:
             metadata_list.append(None)
 
@@ -705,7 +695,7 @@ class StateBuilder:
                                budget_used: float,
                                max_steps: int) -> np.ndarray:
         """
-        Build global features (8 dimensions)
+        Legacy: global features (8 dims), not used by the agent.
         """
         total_paths = (len(pool_state.current_pool) +
                        len(pool_state.explored_paths) +
@@ -740,13 +730,12 @@ class StateBuilder:
 
     def _build_pool_features(self, current_pool: List[Dict]) -> np.ndarray:
         """
-        Build pool features (1600 dimensions = 20 paths × 80 features)
+        Legacy: flat pool features, not used by the agent.
         """
         pool_features = np.zeros((self.max_pool_size, self.path_features_dim),
                                  dtype=np.float32)
 
         for i, path in enumerate(current_pool[:self.max_pool_size]):
-            # Extract 80 features from path with new method
             path_vector = self._extract_path_features(path)
 
             # Validation
@@ -773,8 +762,8 @@ class StateBuilder:
 
     def _build_contract_embedding(self, contract: ContractData) -> np.ndarray:
         """
-        Build contract embedding (64 dimensions)
-        Note: We don't include label and risk_distribution (information leak)
+        Legacy: contract embedding (64 dims), not used by the agent.
+        Label and risk distribution are left out on purpose (they would leak the label).
         """
         embedding = []
 
@@ -809,7 +798,7 @@ class StateBuilder:
         embedding.extend([0.0] * 8)
 
         # 3. Path features from profile (20 dims)
-        # Note: only total_paths and avg_mitigations, not risk_distribution!
+        # path counts and mitigations only, no risk distribution (leakage)
         taint_summary = contract.profile.get('taint_summary', {})
         embedding.extend([
             taint_summary.get('total_paths', 0) / 100.0,
@@ -826,7 +815,7 @@ class StateBuilder:
             consolidated.get('require_density', 0),
             consolidated.get('modifier_usage', 0),
             consolidated.get('source_sink_ratio', 0),
-            # not protection_coverage (might be a leak)
+            # protection_coverage left out (possible leakage)
         ])
 
         embedding = np.array(embedding[:self.contract_embedding_dim], dtype=np.float32)
@@ -843,7 +832,7 @@ class StateBuilder:
 
     def _build_pool_metadata(self, pool_state: PoolState) -> np.ndarray:
         """
-        Build pool metadata (8 dimensions)
+        Legacy: pool metadata (8 dims), not used by the agent.
         """
         total_paths = (len(pool_state.current_pool) +
                        len(pool_state.explored_paths) +
@@ -883,19 +872,19 @@ class StateBuilder:
         return metadata
 
     def update_step(self, action: str):
-        """Update for next step"""
+        """Advance the step counter."""
         self.episode_step += 1
         self.last_action = action
         logger.debug(f"Step updated: {self.episode_step}, last_action={action}")
 
     def reset(self):
-        """Reset for new episode"""
+        """Reset at the start of an episode."""
         self.episode_step = 0
         self.last_action = None
         logger.debug("StateBuilder reset for new episode")
 
     def get_state_info(self) -> Dict:
-        """Debug information about enhanced state"""
+        """Debug info (refers to the legacy layout)."""
         return {
             'state_dim': self.state_dim,
             'max_pool_size': self.max_pool_size,
