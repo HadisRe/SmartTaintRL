@@ -1,15 +1,12 @@
-# pool_manager.py
-"""
-Pool Manager Module for RL Environment
-مدیریت انتخاب و refill paths برای هر episode
-"""
+# env2_pool_manager.py
+# Pool of candidate paths shown to the agent during an episode.
 
 import random
 import logging
 from typing import List, Dict, Set, Optional, Tuple
 import numpy as np
 from dataclasses import dataclass, field
-from env1 import ContractData
+from env1_data_loader import ContractData
 
 # Configure logging
 logging.basicConfig(
@@ -21,10 +18,10 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class PoolState:
-    """وضعیت فعلی pool در یک episode"""
+    """Pool state within one episode."""
     current_pool: List[Dict] = field(default_factory=list)
-    explored_paths: Set[int] = field(default_factory=set)  # path indices که بررسی شده
-    available_paths: List[Dict] = field(default_factory=list)  # paths که هنوز موجود است
+    explored_paths: Set[int] = field(default_factory=set)  # path indices already decided
+    available_paths: List[Dict] = field(default_factory=list)  # paths not drawn yet
     refill_count: int = 0
     total_analyzed: int = 0
 
@@ -34,12 +31,10 @@ class PoolState:
 
 class PoolManager:
     """
-    مدیریت pool از paths در طول episode
-    مسئولیت‌ها:
-    - انتخاب اولیه paths برای pool
-    - حذف paths بررسی شده
-    - Refill pool وقتی کم شد
-    - Priority scoring بدون information leakage
+    Keeps the pool of paths during an episode: draws the initial pool,
+    removes decided paths and refills the pool when it gets small.
+    The priority score is used only to choose refill paths; it is not
+    part of the agent's input.
     """
 
     def __init__(self,
@@ -48,9 +43,9 @@ class PoolManager:
                  max_priority_ratio: float = 0.5):
         """
         Args:
-            min_pool_threshold: وقتی pool زیر این تعداد رفت، refill کن
-            priority_start_episode: از این episode به بعد priority scoring شروع شود
-            max_priority_ratio: حداکثر نسبت priority paths در pool
+            min_pool_threshold: refill when the pool drops below this size
+            priority_start_episode: episode from which priority selection may be used
+            max_priority_ratio: maximum share of priority-selected paths in the pool
         """
         self.min_pool_threshold = min_pool_threshold
         self.priority_start_episode = priority_start_episode
@@ -77,13 +72,8 @@ class PoolManager:
 
     def determine_pool_size(self, total_paths: int) -> int:
         """
-        تعیین اندازه pool بر اساس تعداد کل paths
-
-        Args:
-            total_paths: تعداد کل paths در contract
-
-        Returns:
-            اندازه مناسب pool
+        Pool size from the number of paths in the contract.
+        (Not used by initialize_pool, which has its own rule.)
         """
         if total_paths <= 20:
             size = total_paths
@@ -99,18 +89,16 @@ class PoolManager:
 
     def calculate_priority_score(self, path: Dict) -> float:
         """
-        محاسبه priority score برای یک path
-        توجه: این score فقط برای internal use است و به agent داده نمی‌شود
-
-        Args:
-            path: اطلاعات path
+        Fixed priority of a path from its source, sink and missing protection.
+        Used for refills only; the agent never sees this value.
+        This is also the score of the Top-k baseline in the paper (Table 10).
 
         Returns:
-            priority score (بالاتر = مهم‌تر)
+            priority score (higher = more urgent)
         """
         score = 0.0
 
-        # بررسی basic_info برای source/sink types
+        # source / sink types
         basic_info = path.get('basic_info', {})
         source_type = basic_info.get('source_type', '')
         sink_type = basic_info.get('sink_type', '')
@@ -133,18 +121,18 @@ class PoolManager:
         elif sink_type:  # Any other sink
             score += 0.5
 
-        # Check protection features
+        # Missing protection raises the priority
         features = path.get('aggregate_features', {})
         if features.get('has_modifier_protection', 0) == 0:
-            score += 1.5  # No protection = higher priority
+            score += 1.5
         if features.get('require_density', 0) < 0.2:
-            score += 1.0  # Low require density = higher priority
+            score += 1.0
         if features.get('has_external_protection', 0) == 0:
             score += 1.0
 
-        # Reliability factor
+        # Lower mitigation = higher priority
         reliability = features.get('mitigation_score', 1.0)
-        score *= (1 - reliability * 0.5)  # Lower mitigation = higher priority
+        score *= (1 - reliability * 0.5)
 
         logger.debug(f"Path {path.get('path_index', -1)} priority score: {score:.2f} "
                      f"(source={source_type}, sink={sink_type})")
@@ -153,13 +141,13 @@ class PoolManager:
 
     def initialize_pool(self, contract: ContractData, episode: int) -> PoolState:
         """
-        ایجاد pool اولیه با حداقل تنوع
+        Draw the initial pool at random (the only random step of an episode).
         """
-        self.current_episode = episode  # اضافه شد
+        self.current_episode = episode
         all_paths = contract.paths
         total_paths = len(all_paths)
 
-        # تعیین pool size
+        # pool size, as in Section 4.2.4 of the paper
         if total_paths <= 10:
             pool_size = min(total_paths, 10)
         elif total_paths <= 20:
@@ -169,15 +157,12 @@ class PoolManager:
         else:
             pool_size = min(30, total_paths // 2)
 
-        # Simple random sampling برای حالا
-        # می‌توانید بعداً curriculum learning اضافه کنید
         selected_indices = np.random.choice(
             total_paths,
             size=min(pool_size, total_paths),
             replace=False
         ).tolist()
 
-        # ساخت pool
         current_pool = [all_paths[i] for i in selected_indices]
         available_paths = [all_paths[i] for i in range(total_paths) if i not in selected_indices]
 
@@ -193,11 +178,11 @@ class PoolManager:
 
         return pool_state
     def _select_random(self, paths: List[Dict], count: int) -> List[Dict]:
-        """انتخاب تصادفی paths"""
+        """Pick paths at random."""
         count = min(count, len(paths))
         selected = random.sample(paths, count)
 
-        # Shuffle برای جلوگیری از position bias
+        # shuffle so the position in the pool carries no information
         random.shuffle(selected)
 
         self.debug_stats['random_selections'] += count
@@ -209,22 +194,21 @@ class PoolManager:
                       pool_size: int,
                       priority_ratio: float) -> List[Dict]:
         """
-        انتخاب ترکیبی از priority و random
+        Mix of priority-based and random selection.
 
         Args:
-            paths: همه paths موجود
-            pool_size: اندازه pool مورد نیاز
-            priority_ratio: نسبت paths که بر اساس priority انتخاب شوند
+            paths: candidate paths
+            pool_size: number of paths to select
+            priority_ratio: share selected by priority
         """
         pool_size = min(pool_size, len(paths))
         n_priority = int(pool_size * priority_ratio)
         n_random = pool_size - n_priority
 
-        # محاسبه priority برای همه paths
         paths_with_priority = [(p, self.calculate_priority_score(p)) for p in paths]
         paths_with_priority.sort(key=lambda x: x[1], reverse=True)
 
-        # انتخاب top priority paths
+        # highest-priority paths first
         selected = []
         if n_priority > 0:
             priority_paths = [p for p, _ in paths_with_priority[:n_priority]]
@@ -232,7 +216,7 @@ class PoolManager:
             self.debug_stats['priority_selections'] += n_priority
             logger.debug(f"Selected {n_priority} high-priority paths")
 
-        # انتخاب random از بقیه
+        # the rest at random
         if n_random > 0:
             remaining = [p for p, _ in paths_with_priority[n_priority:]]
             if len(remaining) >= n_random:
@@ -243,7 +227,7 @@ class PoolManager:
             self.debug_stats['random_selections'] += len(random_paths)
             logger.debug(f"Selected {len(random_paths)} random paths")
 
-        # Shuffle نهایی برای مخفی کردن priority order
+        # hide the priority order
         random.shuffle(selected)
         return selected
 
@@ -251,14 +235,14 @@ class PoolManager:
                              pool_state: PoolState,
                              path_index: int) -> bool:
         """
-        وقتی agent یک path را ANALYZE کرد
+        Remove a decided path from the pool and refill if needed.
 
         Args:
-            pool_state: وضعیت فعلی pool
-            path_index: index path در pool
+            pool_state: current pool
+            path_index: position of the path in the pool
 
         Returns:
-            True اگر موفق بود، False اگر خطا
+            True on success, False for an invalid index
         """
         if path_index < 0 or path_index >= len(pool_state.current_pool):
             logger.error(f"Invalid path index: {path_index}")
@@ -267,24 +251,21 @@ class PoolManager:
         path = pool_state.current_pool[path_index]
         path_id = path.get('path_index', -1)
 
-        # اضافه به explored
         pool_state.explored_paths.add(path_id)
         pool_state.total_analyzed += 1
 
-        # حذف از pool
         pool_state.current_pool.pop(path_index)
 
         logger.debug(f"Path {path_id} analyzed and removed from pool. "
                      f"Pool size now: {len(pool_state.current_pool)}")
 
-        # بررسی نیاز به refill
         if self._needs_refill(pool_state):
             self.refill_pool(pool_state)
 
         return True
 
     def _needs_refill(self, pool_state: PoolState) -> bool:
-        """آیا pool نیاز به refill دارد؟"""
+        """True if the pool is below the threshold and paths are left."""
         needs = (len(pool_state.current_pool) < self.min_pool_threshold and
                  len(pool_state.available_paths) > 0)
 
@@ -295,13 +276,10 @@ class PoolManager:
 
     def refill_pool(self, pool_state: PoolState) -> int:
         """
-        پر کردن مجدد pool
-
-        Args:
-            pool_state: وضعیت فعلی pool
+        Refill the pool up to min_pool_threshold.
 
         Returns:
-            تعداد paths اضافه شده
+            number of paths added
         """
         target_size = self.min_pool_threshold
         current_size = len(pool_state.current_pool)
@@ -311,7 +289,7 @@ class PoolManager:
             logger.warning("No paths available for refill")
             return 0
 
-        # استراتژی refill: 50% priority, 50% random
+        # half by priority, half at random
         n_priority = n_to_add // 2
         n_random = n_to_add - n_priority
 
@@ -328,7 +306,7 @@ class PoolManager:
                 new_paths.append(path)
                 pool_state.available_paths.remove(path)
 
-        # Random selection از باقی‌مانده
+        # Random selection from the remaining paths
         if n_random > 0 and pool_state.available_paths:
             random_count = min(n_random, len(pool_state.available_paths))
             random_paths = random.sample(pool_state.available_paths, random_count)
@@ -336,11 +314,10 @@ class PoolManager:
             for p in random_paths:
                 pool_state.available_paths.remove(p)
 
-        # اضافه کردن به pool
         pool_state.current_pool.extend(new_paths)
         pool_state.refill_count += 1
 
-        # Shuffle pool برای مخفی کردن refill pattern
+        # shuffle so refilled paths cannot be told apart by position
         random.shuffle(pool_state.current_pool)
 
         self.debug_stats['total_refills'] += 1
@@ -350,7 +327,7 @@ class PoolManager:
         return len(new_paths)
 
     def get_pool_statistics(self, pool_state: PoolState) -> Dict:
-        """آمار وضعیت pool"""
+        """Pool statistics for logging."""
         stats = {
             'current_pool_size': len(pool_state.current_pool),
             'explored_count': len(pool_state.explored_paths),
