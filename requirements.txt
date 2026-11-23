@@ -1,12 +1,20 @@
-# SmartTaintRL Dependencies
+# Versions used in the paper: Python 3.12, PyTorch 2.6 (CPU), NetworkX 3.4, scikit-learn 1.7
 
-# Deep Learning
-torch>=1.9.0
-numpy>=1.19.0
+# agent and localization
+torch>=2.0
+numpy>=1.24
+gymnasium>=0.28
+networkx>=3.0
+matplotlib>=3.5
+seaborn>=0.12
 
-# Reinforcement Learning Environment
-gymnasium>=0.28.0
+# experiments (contract-level decision, baselines, statistics)
+scikit-learn>=1.7
+scipy>=1.10
+xgboost>=2.0
+lightgbm>=4.0
 
-# Visualization
-matplotlib>=3.4.0
-seaborn>=0.11.0
+# external tools, only for the tool comparison
+# slither-analyzer==0.11.6
+# mythril==0.24.8
+# py-solc-x
